@@ -30,7 +30,7 @@ jobs:
 
     - name: Setup 🪛
       run: |
-        mkdir -p ~/win-cross
+        cd gecko-dev
 
         cp ./.github/workflows/win64.mozconfig mozconfig
 
