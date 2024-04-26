@@ -390,11 +390,12 @@ def cargo_vet(command_context, arguments, stdout=None, env=os.environ):
 
     locked = "--locked" in arguments
     if locked:
-        # The use of --locked requires .cargo/config to exist, but other things,
+        # The use of --locked requires .cargo/config.toml to exist, but other things,
         # like cargo update, don't want it there, so remove it once we're done.
         topsrcdir = Path(command_context.topsrcdir)
         shutil.copyfile(
-            topsrcdir / ".cargo" / "config.in", topsrcdir / ".cargo" / "config"
+            topsrcdir / ".cargo" / "config.toml.in",
+            topsrcdir / ".cargo" / "config.toml",
         )
 
     try:
@@ -406,7 +407,7 @@ def cargo_vet(command_context, arguments, stdout=None, env=os.environ):
         )
     finally:
         if locked:
-            (topsrcdir / ".cargo" / "config").unlink()
+            (topsrcdir / ".cargo" / "config.toml").unlink()
 
     # When the function is invoked without stdout set (the default when running
     # as a mach subcommand), exit with the returncode from cargo vet.
@@ -1156,7 +1157,26 @@ def package(command_context, verbose=False):
     )
     if ret == 0:
         command_context.notify("Packaging complete")
+        _print_package_name(command_context)
     return ret
+
+
+def _print_package_name(command_context):
+    dist_path = mozpath.join(command_context.topobjdir, "dist")
+    package_name_path = mozpath.join(dist_path, "package_name.txt")
+    if not os.path.exists(package_name_path):
+        return
+
+    with open(package_name_path, "r") as f:
+        package_name = f.read().strip()
+    package_path = mozpath.join(dist_path, package_name)
+
+    if not os.path.exists(package_path):
+        return
+
+    command_context.log(
+        logging.INFO, "package", {}, "Created package: {}".format(package_path)
+    )
 
 
 def _get_android_install_parser():

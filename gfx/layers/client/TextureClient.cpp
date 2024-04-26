@@ -748,12 +748,10 @@ void TextureClient::ReadUnlock() {
 }
 
 bool TextureClient::Lock(OpenMode aMode) {
-  MOZ_ASSERT(IsValid());
-  MOZ_ASSERT(!mIsLocked);
-  if (!IsValid()) {
+  if (NS_WARN_IF(!IsValid())) {
     return false;
   }
-  if (mIsLocked) {
+  if (NS_WARN_IF(mIsLocked)) {
     return mOpenMode == aMode;
   }
 
@@ -1548,12 +1546,7 @@ TextureClient::TextureClient(TextureData* aData, TextureFlags aFlags,
       mUpdated(false),
       mAddedToCompositableClient(false),
       mFwdTransactionId(0),
-      mSerial(++sSerialCounter)
-#ifdef GFX_DEBUG_TRACK_CLIENTS_IN_POOL
-      ,
-      mPoolTracker(nullptr)
-#endif
-{
+      mSerial(++sSerialCounter) {
   mData->FillInfo(mInfo);
   mFlags |= mData->GetTextureFlags();
 }

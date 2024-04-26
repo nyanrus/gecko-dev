@@ -45,6 +45,7 @@ template struct StyleStrong<StyleLockedKeyframesRule>;
 template struct StyleStrong<StyleMediaRule>;
 template struct StyleStrong<StyleDocumentRule>;
 template struct StyleStrong<StyleNamespaceRule>;
+template struct StyleStrong<StyleMarginRule>;
 template struct StyleStrong<StyleLockedPageRule>;
 template struct StyleStrong<StylePropertyRule>;
 template struct StyleStrong<StyleSupportsRule>;
@@ -53,6 +54,8 @@ template struct StyleStrong<StyleFontPaletteValuesRule>;
 template struct StyleStrong<StyleLockedFontFaceRule>;
 template struct StyleStrong<StyleLockedCounterStyleRule>;
 template struct StyleStrong<StyleContainerRule>;
+template struct StyleStrong<StyleScopeRule>;
+template struct StyleStrong<StyleStartingStyleRule>;
 
 template <typename T>
 inline void StyleOwnedSlice<T>::Clear() {
@@ -1199,6 +1202,20 @@ inline nsRect StyleZoom::Unzoom(const nsRect& aValue) const {
   }
   return nsRect(UnzoomCoord(aValue.X()), UnzoomCoord(aValue.Y()),
                 UnzoomCoord(aValue.Width()), UnzoomCoord(aValue.Height()));
+}
+
+template <>
+inline gfx::Point StyleCoordinatePair<StyleCSSFloat>::ToGfxPoint(
+    const CSSSize* aBasis) const {
+  return gfx::Point(x, y);
+}
+
+template <>
+inline gfx::Point StyleCoordinatePair<LengthPercentage>::ToGfxPoint(
+    const CSSSize* aBasis) const {
+  MOZ_ASSERT(aBasis);
+  return gfx::Point(x.ResolveToCSSPixels(aBasis->Width()),
+                    y.ResolveToCSSPixels(aBasis->Height()));
 }
 
 }  // namespace mozilla

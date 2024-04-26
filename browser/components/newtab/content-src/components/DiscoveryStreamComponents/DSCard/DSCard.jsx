@@ -2,10 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import {
-  actionCreators as ac,
-  actionTypes as at,
-} from "common/Actions.sys.mjs";
+import { actionCreators as ac, actionTypes as at } from "common/Actions.mjs";
 import { DSImage } from "../DSImage/DSImage.jsx";
 import { DSLinkMenu } from "../DSLinkMenu/DSLinkMenu";
 import { ImpressionStats } from "../../DiscoveryStreamImpressionStats/ImpressionStats";
@@ -101,9 +98,7 @@ export const DefaultMeta = ({
           sponsored_by_override={sponsored_by_override}
         />
       )}
-      <header title={title} className="title clamp">
-        {title}
-      </header>
+      <header className="title clamp">{title}</header>
       {excerpt && <p className="excerpt clamp">{excerpt}</p>}
     </div>
     {!newSponsoredLabel && (
@@ -200,6 +195,8 @@ export class _DSCard extends React.PureComponent {
             ...(this.props.shim && this.props.shim.click
               ? { shim: this.props.shim.click }
               : {}),
+            fetchTimestamp: this.props.fetchTimestamp,
+            firstVisibleTimestamp: this.props.firstVisibleTimestamp,
           },
         })
       );
@@ -247,6 +244,8 @@ export class _DSCard extends React.PureComponent {
             ...(this.props.shim && this.props.shim.save
               ? { shim: this.props.shim.save }
               : {}),
+            fetchTimestamp: this.props.fetchTimestamp,
+            firstVisibleTimestamp: this.props.firstVisibleTimestamp,
           },
         })
       );
@@ -411,7 +410,7 @@ export class _DSCard extends React.PureComponent {
     };
 
     return (
-      <div
+      <article
         className={`ds-card ${compactImagesClassName} ${imageGradientClassName} ${titleLinesName} ${descLinesClassName} ${ctaButtonClassName} ${ctaButtonVariantClassName}`}
         ref={this.setContextMenuButtonHostRef}
       >
@@ -431,6 +430,7 @@ export class _DSCard extends React.PureComponent {
           dispatch={this.props.dispatch}
           onLinkClick={!this.props.placeholder ? this.onLinkClick : undefined}
           url={this.props.url}
+          title={this.props.title}
         >
           <ImpressionStats
             flightId={this.props.flightId}
@@ -442,10 +442,12 @@ export class _DSCard extends React.PureComponent {
                   ? { shim: this.props.shim.impression }
                   : {}),
                 recommendation_id: this.props.recommendation_id,
+                fetchTimestamp: this.props.fetchTimestamp,
               },
             ]}
             dispatch={this.props.dispatch}
             source={this.props.type}
+            firstVisibleTimestamp={this.props.firstVisibleTimestamp}
           />
         </SafeAnchor>
         {ctaButtonVariant === "variant-b" && (
@@ -517,7 +519,7 @@ export class _DSCard extends React.PureComponent {
             isRecentSave={isRecentSave}
           />
         )}
-      </div>
+      </article>
     );
   }
 }

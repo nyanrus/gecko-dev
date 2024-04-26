@@ -30,6 +30,8 @@ skip-if = [
 ["browser_bfcache_exemption_about_pages.js"]
 skip-if = ["!fission"]
 
+["browser_blank_tab_label.js"]
+
 ["browser_bug580956.js"]
 
 ["browser_bug_1387976_restore_lazy_tab_browser_muted_state.js"]
@@ -75,6 +77,8 @@ skip-if = ["debug"] # Bug 1444565, Bug 1457887
 support-files = ["tab_that_closes.html"]
 
 ["browser_hiddentab_contextmenu.js"]
+
+["browser_lastSeenActive.js"]
 
 ["browser_lazy_tab_browser_events.js"]
 
@@ -137,6 +141,8 @@ support-files = [
 ["browser_multiselect_tabs_clear_selection_when_tab_switch.js"]
 
 ["browser_multiselect_tabs_close.js"]
+
+["browser_multiselect_tabs_close_duplicate_tabs.js"]
 
 ["browser_multiselect_tabs_close_other_tabs.js"]
 

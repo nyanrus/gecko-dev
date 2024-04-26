@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { actionTypes as at } from "resource://activity-stream/common/Actions.sys.mjs";
+import { actionTypes as at } from "resource://activity-stream/common/Actions.mjs";
 import { Dedupe } from "resource://activity-stream/common/Dedupe.sys.mjs";
 
 export const TOP_SITES_DEFAULT_ROWS = 1;
@@ -100,6 +100,16 @@ export const INITIAL_STATE = {
     fakeFocus: false,
     // Hide the search box after handing off to AwesomeBar and user starts typing.
     hide: false,
+  },
+  Wallpapers: {
+    wallpaperList: [],
+  },
+  Weather: {
+    // do we have the data from WeatherFeed yet?
+    initialized: false,
+    // stub out demo data while building the feature
+    data: {},
+    lastUpdated: null,
   },
 };
 
@@ -841,6 +851,15 @@ function Search(prevState = INITIAL_STATE.Search, action) {
   }
 }
 
+function Wallpapers(prevState = INITIAL_STATE.Wallpapers, action) {
+  switch (action.type) {
+    case at.WALLPAPERS_SET:
+      return { wallpaperList: action.data };
+    default:
+      return prevState;
+  }
+}
+
 export const reducers = {
   TopSites,
   App,
@@ -852,4 +871,5 @@ export const reducers = {
   Personalization,
   DiscoveryStream,
   Search,
+  Wallpapers,
 };

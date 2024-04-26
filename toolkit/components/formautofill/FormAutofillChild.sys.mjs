@@ -8,11 +8,16 @@ import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  AddressResult: "resource://autofill/ProfileAutoCompleteResult.sys.mjs",
   AutoCompleteChild: "resource://gre/actors/AutoCompleteChild.sys.mjs",
   AutofillTelemetry: "resource://gre/modules/shared/AutofillTelemetry.sys.mjs",
+  CreditCardResult: "resource://autofill/ProfileAutoCompleteResult.sys.mjs",
+  GenericAutocompleteItem: "resource://gre/modules/FillHelpers.sys.mjs",
+  InsecurePasswordUtils: "resource://gre/modules/InsecurePasswordUtils.sys.mjs",
   FormAutofill: "resource://autofill/FormAutofill.sys.mjs",
   FormAutofillContent: "resource://autofill/FormAutofillContent.sys.mjs",
   FormAutofillUtils: "resource://gre/modules/shared/FormAutofillUtils.sys.mjs",
+  FormScenarios: "resource://gre/modules/FormScenarios.sys.mjs",
   FormStateManager: "resource://gre/modules/shared/FormStateManager.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
   ProfileAutocomplete:
@@ -124,33 +129,18 @@ export class FormAutofillChild extends JSWindowActorChild {
     lazy.AutoCompleteChild.removePopupStateListener(this);
   }
 
-  popupStateChanged(messageName, data, _target) {
-    let docShell;
-    try {
-      docShell = this.docShell;
-    } catch (ex) {
-      lazy.AutoCompleteChild.removePopupStateListener(this);
-      return;
-    }
-
+  popupStateChanged(messageName, _data, _target) {
     if (!lazy.FormAutofill.isAutofillEnabled) {
       return;
     }
 
-    const { chromeEventHandler } = docShell;
-
     switch (messageName) {
-      case "FormAutoComplete:PopupClosed": {
-        this.onPopupClosed(data.selectedRowStyle);
-        Services.tm.dispatchToMainThread(() => {
-          chromeEventHandler.removeEventListener("keydown", this, true);
-        });
-
+      case "AutoComplete:PopupClosed": {
+        this.onPopupClosed();
         break;
       }
-      case "FormAutoComplete:PopupOpened": {
+      case "AutoComplete:PopupOpened": {
         this.onPopupOpened();
-        chromeEventHandler.addEventListener("keydown", this, true);
         break;
       }
     }
@@ -385,10 +375,6 @@ export class FormAutofillChild extends JSWindowActorChild {
     }
 
     switch (evt.type) {
-      case "keydown": {
-        this._onKeyDown(evt);
-        break;
-      }
       case "focusin": {
         if (lazy.FormAutofill.isAutofillEnabled) {
           this.onFocusIn(evt);
@@ -497,11 +483,9 @@ export class FormAutofillChild extends JSWindowActorChild {
       return;
     }
 
-    const doc = this.document;
-
     switch (message.name) {
       case "FormAutofill:PreviewProfile": {
-        this.previewProfile(doc);
+        this.previewProfile(message.data.selectedIndex);
         break;
       }
       case "FormAutofill:ClearForm": {
@@ -677,66 +661,31 @@ export class FormAutofillChild extends JSWindowActorChild {
     }
   }
 
-  previewProfile(doc) {
-    let docWin = doc.ownerGlobal;
-    let selectedIndex = lazy.ProfileAutocomplete._getSelectedIndex(docWin);
-    let lastAutoCompleteResult =
-      lazy.ProfileAutocomplete.lastProfileAutoCompleteResult;
-    let focusedInput = this.activeInput;
+  get lastProfileAutoCompleteResult() {
+    return this.manager.getActor("AutoComplete")?.lastProfileAutoCompleteResult;
+  }
 
+  get lastProfileAutoCompleteFocusedInput() {
+    return this.manager.getActor("AutoComplete")
+      ?.lastProfileAutoCompleteFocusedInput;
+  }
+
+  previewProfile(selectedIndex) {
     if (
       selectedIndex === -1 ||
-      !focusedInput ||
-      !lastAutoCompleteResult ||
-      lastAutoCompleteResult.getStyleAt(selectedIndex) != "autofill-profile"
+      !this.activeInput ||
+      this.lastProfileAutoCompleteResult?.getStyleAt(selectedIndex) !=
+        "autofill"
     ) {
-      this.sendAsyncMessage("FormAutofill:UpdateWarningMessage", {});
-
       lazy.ProfileAutocomplete._clearProfilePreview();
     } else {
-      let focusedInputDetails = this.activeFieldDetail;
-      let profile = JSON.parse(
-        lastAutoCompleteResult.getCommentAt(selectedIndex)
-      );
-      let allFieldNames = this.activeSection.allFieldNames;
-      let profileFields = allFieldNames.filter(
-        fieldName => !!profile[fieldName]
-      );
-
-      let focusedCategory = lazy.FormAutofillUtils.getCategoryFromFieldName(
-        focusedInputDetails.fieldName
-      );
-      let categories =
-        lazy.FormAutofillUtils.getCategoriesFromFieldNames(profileFields);
-      this.sendAsyncMessage("FormAutofill:UpdateWarningMessage", {
-        focusedCategory,
-        categories,
-      });
-
       lazy.ProfileAutocomplete._previewSelectedProfile(selectedIndex);
     }
   }
 
-  onPopupClosed(selectedRowStyle) {
+  onPopupClosed() {
     this.debug("Popup has closed.");
     lazy.ProfileAutocomplete._clearProfilePreview();
-
-    let lastAutoCompleteResult =
-      lazy.ProfileAutocomplete.lastProfileAutoCompleteResult;
-    let focusedInput = this.activeInput;
-    if (
-      lastAutoCompleteResult &&
-      this._keyDownEnterForInput &&
-      focusedInput === this._keyDownEnterForInput &&
-      focusedInput ===
-        lazy.ProfileAutocomplete.lastProfileAutoCompleteFocusedInput
-    ) {
-      if (selectedRowStyle == "autofill-footer") {
-        this.sendAsyncMessage("FormAutofill:OpenPreferences");
-      } else if (selectedRowStyle == "autofill-clear-button") {
-        this.clearForm();
-      }
-    }
   }
 
   onPopupOpened() {
@@ -762,23 +711,149 @@ export class FormAutofillChild extends JSWindowActorChild {
       return;
     }
 
-    formFillController.markAsAutofillField(field);
+    this.manager
+      .getActor("AutoComplete")
+      ?.markAsAutoCompletableField(field, this);
   }
 
-  _onKeyDown(e) {
-    delete this._keyDownEnterForInput;
-    let lastAutoCompleteResult =
-      lazy.ProfileAutocomplete.lastProfileAutoCompleteResult;
-    let focusedInput = this.activeInput;
-    if (
-      e.keyCode != e.DOM_VK_RETURN ||
-      !lastAutoCompleteResult ||
-      !focusedInput ||
-      focusedInput !=
-        lazy.ProfileAutocomplete.lastProfileAutoCompleteFocusedInput
-    ) {
-      return;
+  get actorName() {
+    return "FormAutofill";
+  }
+
+  /**
+   * Get the search options when searching for autocomplete entries in the parent
+   *
+   * @param {HTMLInputElement} input - The input element to search for autocompelte entries
+   * @returns {object} the search options for the input
+   */
+  getAutoCompleteSearchOption(input) {
+    const fieldDetail = this._fieldDetailsManager
+      ._getFormHandler(input)
+      ?.getFieldDetailByElement(input);
+
+    const scenarioName = lazy.FormScenarios.detect({ input }).signUpForm
+      ? "SignUpFormScenario"
+      : "";
+    return { fieldName: fieldDetail?.fieldName, scenarioName };
+  }
+
+  /**
+   * Ask the provider whether it might have autocomplete entry to show
+   * for the given input.
+   *
+   * @param {HTMLInputElement} input - The input element to search for autocompelte entries
+   * @returns {boolean} true if we shold search for autocomplete entries
+   */
+  shouldSearchForAutoComplete(input) {
+    const fieldDetail = this._fieldDetailsManager
+      ._getFormHandler(input)
+      ?.getFieldDetailByElement(input);
+    if (!fieldDetail) {
+      return false;
     }
-    this._keyDownEnterForInput = focusedInput;
+    const fieldName = fieldDetail.fieldName;
+    const isAddressField = lazy.FormAutofillUtils.isAddressField(fieldName);
+    const searchPermitted = isAddressField
+      ? lazy.FormAutofill.isAutofillAddressesEnabled
+      : lazy.FormAutofill.isAutofillCreditCardsEnabled;
+    // If the specified autofill feature is pref off, do not search
+    if (!searchPermitted) {
+      return false;
+    }
+
+    // No profile can fill the currently-focused input.
+    if (!lazy.FormAutofillContent.savedFieldNames.has(fieldName)) {
+      return false;
+    }
+
+    // The current form has already been populated and the field is not
+    // an empty credit card field.
+    const isCreditCardField =
+      lazy.FormAutofillUtils.isCreditCardField(fieldName);
+    const isInputAutofilled =
+      this.activeHandler.getFilledStateByElement(input) ==
+      lazy.FormAutofillUtils.FIELD_STATES.AUTO_FILLED;
+    const filledRecordGUID = this.activeSection.filledRecordGUID;
+    if (
+      !isInputAutofilled &&
+      filledRecordGUID &&
+      !(isCreditCardField && this.activeInput.value === "")
+    ) {
+      return false;
+    }
+
+    // (address only) less than 3 inputs are covered by all saved fields in the storage.
+    if (
+      isAddressField &&
+      this.activeSection.allFieldNames.filter(field =>
+        lazy.FormAutofillContent.savedFieldNames.has(field)
+      ).length < lazy.FormAutofillUtils.AUTOFILL_FIELDS_THRESHOLD
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Convert the search result to autocomplete results
+   *
+   * @param {string} searchString - The string to search for
+   * @param {HTMLInputElement} input - The input element to search for autocompelte entries
+   * @param {Array<object>} records - autocomplete records
+   * @returns {AutocompleteResult}
+   */
+  searchResultToAutoCompleteResult(searchString, input, records) {
+    if (!records) {
+      return null;
+    }
+
+    const entries = records.records;
+    const externalEntries = records.externalEntries;
+
+    const fieldDetail = this._fieldDetailsManager
+      ._getFormHandler(input)
+      ?.getFieldDetailByElement(input);
+    if (!fieldDetail) {
+      return null;
+    }
+
+    const adaptedRecords = this.activeSection.getAdaptedProfiles(entries);
+    const isSecure = lazy.InsecurePasswordUtils.isFormSecure(
+      this.activeHandler.form
+    );
+    const isInputAutofilled =
+      this.activeHandler.getFilledStateByElement(input) ==
+      lazy.FormAutofillUtils.FIELD_STATES.AUTO_FILLED;
+    const allFieldNames = this.activeSection.allFieldNames;
+
+    const AutocompleteResult = lazy.FormAutofillUtils.isAddressField(
+      fieldDetail.fieldName
+    )
+      ? lazy.AddressResult
+      : lazy.CreditCardResult;
+
+    const acResult = new AutocompleteResult(
+      searchString,
+      fieldDetail.fieldName,
+      allFieldNames,
+      adaptedRecords,
+      { isSecure, isInputAutofilled }
+    );
+
+    acResult.externalEntries.push(
+      ...externalEntries.map(
+        entry =>
+          new lazy.GenericAutocompleteItem(
+            entry.image,
+            entry.title,
+            entry.subtitle,
+            entry.fillMessageName,
+            entry.fillMessageData
+          )
+      )
+    );
+
+    return acResult;
   }
 }

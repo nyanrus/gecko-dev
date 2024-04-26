@@ -71,6 +71,7 @@ const gRuleManagers = [];
 
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
+/** @type {Lazy} */
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
@@ -182,6 +183,8 @@ export class Rule {
 
 class Ruleset {
   /**
+   * @typedef {number} integer
+   *
    * @param {string} rulesetId - extension-defined ruleset ID.
    * @param {integer} rulesetPrecedence
    * @param {Rule[]} rules - extension-defined rules
@@ -1316,7 +1319,7 @@ class RequestDetails {
    * @param {string} options.type - ResourceType (MozContentPolicyType).
    * @param {string} [options.method] - HTTP method
    * @param {integer} [options.tabId]
-   * @param {BrowsingContext} [options.browsingContext] - The BrowsingContext
+   * @param {CanonicalBrowsingContext} [options.browsingContext] - The CBC
    *   associated with the request. Typically the bc for which the subresource
    *   request is initiated, if any. For document requests, this is the parent
    *   (i.e. the parent frame for sub_frame, null for main_frame).
@@ -1975,7 +1978,10 @@ const NetworkIntegration = {
   /**
    * Applies the actions of the DNR rules.
    *
-   * @param {ChannelWrapper} channel
+   * @typedef {ChannelWrapper & { _dnrMatchedRules?: MatchedRule[] }}
+   *          ChannelWrapperViaDNR
+   *
+   * @param {ChannelWrapperViaDNR} channel
    * @returns {boolean} Whether to ignore any responses from the webRequest API.
    */
   onBeforeRequest(channel) {
@@ -1993,7 +1999,7 @@ const NetworkIntegration = {
         this.applyRedirect(channel, finalMatch);
         return true;
       case "upgradeScheme":
-        this.applyUpgradeScheme(channel, finalMatch);
+        this.applyUpgradeScheme(channel);
         return true;
     }
     // If there are multiple rules, then it may be a combination of allow,
@@ -2169,12 +2175,34 @@ class RuleManager {
     this.#updateAllowAllRequestRules();
   }
 
-  getSessionRules() {
-    return this.sessionRules.rules;
+  /**
+   * Get the session scoped rules.
+   *
+   * @param {Array<integer>|null} ruleIds
+            Optional array of rule IDs to return. By default, all the session
+            scoped rules are returned.
+   */
+  getSessionRules(ruleIds = null) {
+    if (!ruleIds) {
+      return this.sessionRules.rules;
+    }
+
+    return this.sessionRules.rules.filter(rule => ruleIds.includes(rule.id));
   }
 
-  getDynamicRules() {
-    return this.dynamicRules.rules;
+  /**
+   * Get the dynamic rules.
+   *
+   * @param {Array<integer>|null} ruleIds
+            Optional array of rule IDs to return. By default, all the dynamic
+            rules are returned.
+   */
+  getDynamicRules(ruleIds = null) {
+    if (!ruleIds) {
+      return this.dynamicRules.rules;
+    }
+
+    return this.dynamicRules.rules.filter(rule => ruleIds.includes(rule.id));
   }
 
   getRulesCount() {
@@ -2294,7 +2322,7 @@ function beforeWebRequestEvent(channel, kind) {
 /**
  * Applies matching DNR rules, some of which may potentially cancel the request.
  *
- * @param {ChannelWrapper} channel
+ * @param {ChannelWrapperViaDNR} channel
  * @param {string} kind - The name of the webRequest event.
  * @returns {boolean} Whether to ignore any responses from the webRequest API.
  */

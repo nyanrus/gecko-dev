@@ -167,6 +167,8 @@ class WasmGlobalObject : public NativeObject {
   static bool valueSetterImpl(JSContext* cx, const CallArgs& args);
   static bool valueSetter(JSContext* cx, unsigned argc, Value* vp);
 
+  wasm::GCPtrVal& mutableVal();
+
  public:
   static const unsigned RESERVED_SLOTS = 2;
   static const JSClass class_;
@@ -182,7 +184,9 @@ class WasmGlobalObject : public NativeObject {
 
   bool isMutable() const;
   wasm::ValType type() const;
-  wasm::GCPtrVal& val() const;
+  const wasm::GCPtrVal& val() const;
+  void setVal(wasm::HandleVal value);
+  void* addressOfCell() const;
 };
 
 // The class of WebAssembly.Instance. Each WasmInstanceObject owns a
@@ -498,6 +502,12 @@ class WasmNamespaceObject : public NativeObject {
 };
 
 extern const JSClass WasmFunctionClass;
+
+bool IsWasmSuspendingObject(JSObject* obj);
+
+#ifdef ENABLE_WASM_JSPI
+JSObject* MaybeUnwrapSuspendingObject(JSObject* wrapper);
+#endif
 
 }  // namespace js
 

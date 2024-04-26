@@ -977,7 +977,7 @@ bool WarpCacheIRTranspiler::emitGuardDynamicSlotValue(ObjOperandId objId,
   return true;
 }
 
-bool WarpCacheIRTranspiler::emitLoadScriptedProxyHandler(ValOperandId resultId,
+bool WarpCacheIRTranspiler::emitLoadScriptedProxyHandler(ObjOperandId resultId,
                                                          ObjOperandId objId) {
   MDefinition* obj = getOperand(objId);
 
@@ -1117,10 +1117,9 @@ bool WarpCacheIRTranspiler::emitGuardNoDenseElements(ObjOperandId objId) {
   return true;
 }
 
-bool WarpCacheIRTranspiler::emitGuardFunctionHasJitEntry(ObjOperandId funId,
-                                                         bool constructing) {
+bool WarpCacheIRTranspiler::emitGuardFunctionHasJitEntry(ObjOperandId funId) {
   MDefinition* fun = getOperand(funId);
-  uint16_t expectedFlags = FunctionFlags::HasJitEntryFlags(constructing);
+  uint16_t expectedFlags = FunctionFlags::HasJitEntryFlags();
   uint16_t unexpectedFlags = 0;
 
   auto* ins =
@@ -1134,8 +1133,7 @@ bool WarpCacheIRTranspiler::emitGuardFunctionHasJitEntry(ObjOperandId funId,
 bool WarpCacheIRTranspiler::emitGuardFunctionHasNoJitEntry(ObjOperandId funId) {
   MDefinition* fun = getOperand(funId);
   uint16_t expectedFlags = 0;
-  uint16_t unexpectedFlags =
-      FunctionFlags::HasJitEntryFlags(/*isConstructing=*/false);
+  uint16_t unexpectedFlags = FunctionFlags::HasJitEntryFlags();
 
   auto* ins =
       MGuardFunctionFlags::New(alloc(), fun, expectedFlags, unexpectedFlags);
@@ -5216,10 +5214,14 @@ bool WarpCacheIRTranspiler::emitLoadOperandResult(ValOperandId inputId) {
 }
 
 bool WarpCacheIRTranspiler::emitLoadWrapperTarget(ObjOperandId objId,
-                                                  ObjOperandId resultId) {
+                                                  ObjOperandId resultId,
+                                                  bool fallible) {
   MDefinition* obj = getOperand(objId);
 
-  auto* ins = MLoadWrapperTarget::New(alloc(), obj);
+  auto* ins = MLoadWrapperTarget::New(alloc(), obj, fallible);
+  if (fallible) {
+    ins->setGuard();
+  }
   add(ins);
 
   return defineOperand(resultId, ins);

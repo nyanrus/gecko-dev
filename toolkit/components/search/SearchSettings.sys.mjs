@@ -94,11 +94,14 @@ export class SearchSettings {
   #settings = null;
 
   /**
-   * @type {object} A deep copy of #settings.
-   *   #cachedSettings is updated when we read the settings from disk and when
-   *   we write settings to disk. #cachedSettings is compared with #settings
-   *   before we do a write to disk. If there's no change to the settings
-   *   attributes, then we don't write the settings to disk.
+   * #cachedSettings is updated when we read the settings from disk and when
+   * we write settings to disk. #cachedSettings is compared with #settings
+   * before we do a write to disk. If there's no change to the settings
+   * attributes, then we don't write the settings to disk.
+   *
+   * This is a deep copy of #settings.
+   *
+   * @type {object}
    */
   #cachedSettings = {};
 
@@ -610,6 +613,27 @@ export class SearchSettings {
         );
       }
     }
+  }
+
+  /**
+   * Finds the settings for the engine, based on the version of the settings
+   * passed in. Older versions of settings used the engine name as the key,
+   * whereas newer versions now use the engine id.
+   *
+   * @param {object} settings
+   *   The saved settings object.
+   * @param {string} engineId
+   *   The id of the engine.
+   * @param {string} engineName
+   *   The name of the engine.
+   * @returns {object|undefined}
+   *   The engine settings if found, undefined otherwise.
+   */
+  static findSettingsForEngine(settings, engineId, engineName) {
+    if (settings.version <= 6) {
+      return settings.engines?.find(e => e._name == engineName);
+    }
+    return settings.engines?.find(e => e.id == engineId);
   }
 
   /**

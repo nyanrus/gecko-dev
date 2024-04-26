@@ -893,7 +893,7 @@ bool SCInput::readArray(T* p, size_t nelems) {
     // To avoid any way in which uninitialized data could escape, zero the array
     // if filling it failed.
     std::uninitialized_fill_n(p, nelems, 0);
-    return false;
+    return reportTruncated();
   }
 
   swapFromLittleEndianInPlace(p, nelems);
@@ -2568,7 +2568,7 @@ BigInt* JSStructuredCloneReader::readBigInt(uint32_t data) {
   if (!in.readArray(result->digits().data(), length)) {
     return nullptr;
   }
-  return result;
+  return JS::BigInt::destructivelyTrimHighZeroDigits(context(), result);
 }
 
 static uint32_t TagToV1ArrayType(uint32_t tag) {

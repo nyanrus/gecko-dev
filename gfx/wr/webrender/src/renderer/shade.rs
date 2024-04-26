@@ -6,6 +6,7 @@ use api::{ImageBufferKind, units::DeviceSize};
 use crate::batch::{BatchKey, BatchKind, BrushBatchKind, BatchFeatures};
 use crate::composite::{CompositeFeatures, CompositeSurfaceFormat};
 use crate::device::{Device, Program, ShaderError};
+use crate::pattern::PatternKind;
 use euclid::default::Transform3D;
 use glyph_rasterizer::GlyphFormat;
 use crate::renderer::{
@@ -631,6 +632,8 @@ pub struct Shaders {
 
     ps_split_composite: LazilyCompiledShader,
     pub ps_quad_textured: LazilyCompiledShader,
+    pub ps_quad_radial_gradient: LazilyCompiledShader,
+    pub ps_quad_conic_gradient: LazilyCompiledShader,
     pub ps_mask: LazilyCompiledShader,
     pub ps_mask_fast: LazilyCompiledShader,
     pub ps_clear: LazilyCompiledShader,
@@ -887,6 +890,26 @@ impl Shaders {
             profile,
         )?;
 
+        let ps_quad_radial_gradient = LazilyCompiledShader::new(
+            ShaderKind::Primitive,
+            "ps_quad_radial_gradient",
+            &[],
+            device,
+            options.precache_flags,
+            &shader_list,
+            profile,
+        )?;
+
+        let ps_quad_conic_gradient = LazilyCompiledShader::new(
+            ShaderKind::Primitive,
+            "ps_quad_conic_gradient",
+            &[],
+            device,
+            options.precache_flags,
+            &shader_list,
+            profile,
+        )?;
+
         let ps_split_composite = LazilyCompiledShader::new(
             ShaderKind::Primitive,
             "ps_split_composite",
@@ -1121,6 +1144,8 @@ impl Shaders {
             ps_text_run,
             ps_text_run_dual_source,
             ps_quad_textured,
+            ps_quad_radial_gradient,
+            ps_quad_conic_gradient,
             ps_mask,
             ps_mask_fast,
             ps_split_composite,
@@ -1153,6 +1178,18 @@ impl Shaders {
             .expect("bug: unsupported scale shader requested")
     }
 
+    pub fn get_quad_shader(
+        &mut self,
+        pattern: PatternKind
+    ) -> &mut LazilyCompiledShader {
+        match pattern {
+            PatternKind::ColorOrTexture => &mut self.ps_quad_textured,
+            PatternKind::RadialGradient => &mut self.ps_quad_radial_gradient,
+            PatternKind::ConicGradient => &mut self.ps_quad_conic_gradient,
+            PatternKind::Mask => unreachable!(),
+        }
+    }
+
     pub fn get(&
         mut self,
         key: &BatchKey,
@@ -1161,8 +1198,17 @@ impl Shaders {
         device: &Device,
     ) -> &mut LazilyCompiledShader {
         match key.kind {
-            BatchKind::Primitive => {
+            BatchKind::Quad(PatternKind::ColorOrTexture) => {
                 &mut self.ps_quad_textured
+            }
+            BatchKind::Quad(PatternKind::RadialGradient) => {
+                &mut self.ps_quad_radial_gradient
+            }
+            BatchKind::Quad(PatternKind::ConicGradient) => {
+                &mut self.ps_quad_conic_gradient
+            }
+            BatchKind::Quad(PatternKind::Mask) => {
+                unreachable!();
             }
             BatchKind::SplitComposite => {
                 &mut self.ps_split_composite
@@ -1291,6 +1337,8 @@ impl Shaders {
         self.cs_border_segment.deinit(device);
         self.ps_split_composite.deinit(device);
         self.ps_quad_textured.deinit(device);
+        self.ps_quad_radial_gradient.deinit(device);
+        self.ps_quad_conic_gradient.deinit(device);
         self.ps_mask.deinit(device);
         self.ps_mask_fast.deinit(device);
         self.ps_clear.deinit(device);

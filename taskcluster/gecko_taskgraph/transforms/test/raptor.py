@@ -76,7 +76,6 @@ def split_apps(config, tests):
     app_symbols = {
         "chrome": "ChR",
         "chrome-m": "ChR",
-        "chromium": "Cr",
         "fenix": "fenix",
         "refbrow": "refbrow",
         "safari": "Saf",
@@ -257,12 +256,6 @@ def modify_extra_options(config, tests):
                     if i:
                         extra_options.pop(i)
                     break
-
-        if "sina" in test_name:
-            extra_options = test.setdefault("mozharness", {}).setdefault(
-                "extra-options", []
-            )
-            extra_options.append("--post-startup-delay=90000")
 
         yield test
 

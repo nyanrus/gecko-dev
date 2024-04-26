@@ -97,8 +97,6 @@ var DownloadsPanel = {
 
     window.addEventListener("unload", this.onWindowUnload);
 
-    window.ensureCustomElements("moz-button-group");
-
     // Load and resume active downloads if required.  If there are downloads to
     // be shown in the panel, they will be loaded asynchronously.
     DownloadsCommon.initializeAllDataLinks();
@@ -327,7 +325,7 @@ var DownloadsPanel = {
     // to the browser window when the panel closes automatically.
     this.hidePanel();
 
-    BrowserDownloadsUI();
+    BrowserCommands.downloadsUI();
   },
 
   // Internal functions

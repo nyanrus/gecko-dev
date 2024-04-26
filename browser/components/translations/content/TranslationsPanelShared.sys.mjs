@@ -13,7 +13,30 @@ ChromeUtils.defineESModuleGetters(lazy, {
  * the FullPageTranslationsPanel and SelectTranslationsPanel classes.
  */
 export class TranslationsPanelShared {
+  /**
+   * @type {Map<string, string>}
+   */
   static #langListsInitState = new Map();
+
+  /**
+   * True if the next language-list initialization to fail for testing.
+   *
+   * @see TranslationsPanelShared.ensureLangListsBuilt
+   *
+   * @type {boolean}
+   */
+  static #simulateLangListError = false;
+
+  /**
+   * Clears cached data regarding the initialization state of the
+   * FullPageTranslationsPanel or the SelectTranslationsPanel.
+   *
+   * This is only needed for test runners to ensure that each test
+   * starts from a clean slate.
+   */
+  static clearCache() {
+    this.#langListsInitState = new Map();
+  }
 
   /**
    * Defines lazy getters for accessing elements in the document based on provided entries.
@@ -46,13 +69,27 @@ export class TranslationsPanelShared {
   }
 
   /**
+   * Ensures that the next call to ensureLangListBuilt wil fail
+   * for the purpose of testing the error state.
+   *
+   * @see TranslationsPanelShared.ensureLangListsBuilt
+   *
+   * @type {boolean}
+   */
+  static simulateLangListError() {
+    this.#simulateLangListError = true;
+  }
+
+  /**
    * Retrieves the initialization state of language lists for the specified panel.
    *
    * @param {FullPageTranslationsPanel | SelectTranslationsPanel} panel
    *   - The panel for which to look up the state.
+   * @param {number} innerWindowId - The id of the current window.
    */
-  static getLangListsInitState(panel) {
-    return TranslationsPanelShared.#langListsInitState.get(panel.id);
+  static getLangListsInitState(panel, innerWindowId) {
+    const key = `${panel.id}-${innerWindowId}`;
+    return TranslationsPanelShared.#langListsInitState.get(key);
   }
 
   /**
@@ -63,16 +100,19 @@ export class TranslationsPanelShared {
    * @param {Document} document - The document object.
    * @param {FullPageTranslationsPanel | SelectTranslationsPanel} panel
    *   - The panel for which to ensure language lists are built.
+   * @param {number} innerWindowId - The id of the current window.
    */
-  static async ensureLangListsBuilt(document, panel) {
-    const { id } = panel;
-    switch (TranslationsPanelShared.#langListsInitState.get(id)) {
+  static async ensureLangListsBuilt(document, panel, innerWindowId) {
+    const key = `${panel.id}-${innerWindowId}`;
+    switch (TranslationsPanelShared.#langListsInitState.get(key)) {
       case "initialized":
         // This has already been initialized.
         return;
       case "error":
       case undefined:
-        // attempt to initialize
+        // Set the error state in case there is an early exit at any point.
+        // This will be set to "initialized" if everything succeeds.
+        TranslationsPanelShared.#langListsInitState.set(key, "error");
         break;
       default:
         throw new Error(
@@ -86,7 +126,8 @@ export class TranslationsPanelShared {
       await lazy.TranslationsParent.getSupportedLanguages();
 
     // Verify that we are in a proper state.
-    if (languagePairs.length === 0) {
+    if (languagePairs.length === 0 || this.#simulateLangListError) {
+      this.#simulateLangListError = false;
       throw new Error("No translation languages were retrieved.");
     }
 
@@ -98,6 +139,15 @@ export class TranslationsPanelShared {
     );
 
     for (const popup of fromPopups) {
+      // For the moment, the FullPageTranslationsPanel includes its own
+      // menu item for "Choose another language" as the first item in the list
+      // with an empty-string for its value. The SelectTranslationsPanel has
+      // only languages in its list with BCP-47 tags for values. As such,
+      // this loop works for both panels, to remove all of the languages
+      // from the list, but ensuring that any empty-string items are retained.
+      while (popup.lastChild?.value) {
+        popup.lastChild.remove();
+      }
       for (const { langTag, displayName } of fromLanguages) {
         const fromMenuItem = document.createXULElement("menuitem");
         fromMenuItem.setAttribute("value", langTag);
@@ -107,6 +157,9 @@ export class TranslationsPanelShared {
     }
 
     for (const popup of toPopups) {
+      while (popup.lastChild?.value) {
+        popup.lastChild.remove();
+      }
       for (const { langTag, displayName } of toLanguages) {
         const toMenuItem = document.createXULElement("menuitem");
         toMenuItem.setAttribute("value", langTag);
@@ -115,6 +168,6 @@ export class TranslationsPanelShared {
       }
     }
 
-    TranslationsPanelShared.#langListsInitState.set(id, "initialized");
+    TranslationsPanelShared.#langListsInitState.set(key, "initialized");
   }
 }

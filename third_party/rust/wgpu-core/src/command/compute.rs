@@ -36,6 +36,7 @@ use serde::Serialize;
 
 use thiserror::Error;
 
+use std::sync::Arc;
 use std::{fmt, mem, str};
 
 #[doc(hidden)]
@@ -272,14 +273,14 @@ where
     }
 }
 
-struct State<A: HalApi> {
+struct State<'a, A: HalApi> {
     binder: Binder<A>,
     pipeline: Option<id::ComputePipelineId>,
-    scope: UsageScope<A>,
+    scope: UsageScope<'a, A>,
     debug_scope_depth: u32,
 }
 
-impl<A: HalApi> State<A> {
+impl<'a, A: HalApi> State<'a, A> {
     fn is_ready(&self) -> Result<(), DispatchError> {
         let bind_mask = self.binder.invalid_mask();
         if bind_mask != 0 {
@@ -365,7 +366,8 @@ impl Global {
 
         let hub = A::hub(self);
 
-        let cmd_buf = CommandBuffer::get_encoder(hub, encoder_id).map_pass_err(pass_scope)?;
+        let cmd_buf: Arc<CommandBuffer<A>> =
+            CommandBuffer::get_encoder(hub, encoder_id).map_pass_err(pass_scope)?;
         let device = &cmd_buf.device;
         if !device.is_valid() {
             return Err(ComputePassErrorInner::InvalidDevice(
@@ -407,7 +409,7 @@ impl Global {
         let mut state = State {
             binder: Binder::new(),
             pipeline: None,
-            scope: UsageScope::new(&device.tracker_indices),
+            scope: device.new_usage_scope(),
             debug_scope_depth: 0,
         };
         let mut temp_offsets = Vec::new();
@@ -868,6 +870,7 @@ impl Global {
             transit,
             &mut tracker.textures,
             device,
+            &snatch_guard,
         );
         CommandBuffer::insert_barriers_from_tracker(
             transit,

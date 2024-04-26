@@ -209,6 +209,10 @@ NS_EVENT_MESSAGE(eLegacyDOMFocusOut)
 NS_EVENT_MESSAGE(ePageShow)
 NS_EVENT_MESSAGE(ePageHide)
 
+// Canvas events
+NS_EVENT_MESSAGE(eContextLost)
+NS_EVENT_MESSAGE(eContextRestored)
+
 // SVG events
 NS_EVENT_MESSAGE(eSVGLoad)
 NS_EVENT_MESSAGE(eSVGScroll)
@@ -428,6 +432,9 @@ NS_EVENT_MESSAGE_FIRST_LAST(eGamepadEvent, eGamepadButtonDown,
 NS_EVENT_MESSAGE(eEditorInput)
 NS_EVENT_MESSAGE(eEditorBeforeInput)
 
+// textInput event which is a default action of beforeinput
+NS_EVENT_MESSAGE(eLegacyTextInput)
+
 // selection events
 NS_EVENT_MESSAGE(eSelectStart)
 NS_EVENT_MESSAGE(eSelectionChange)
@@ -445,11 +452,6 @@ NS_EVENT_MESSAGE(eToggle)
 // Dialog element events.
 NS_EVENT_MESSAGE(eClose)
 NS_EVENT_MESSAGE(eCancel)
-
-// Marquee element events.
-NS_EVENT_MESSAGE(eMarqueeBounce)
-NS_EVENT_MESSAGE(eMarqueeStart)
-NS_EVENT_MESSAGE(eMarqueeFinish)
 
 NS_EVENT_MESSAGE(eScrollend)
 

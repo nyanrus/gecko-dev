@@ -13,6 +13,7 @@ prefs = [
 ["test_basic.js"]
 
 ["test_bounce_tracking_protection.js"]
+skip-if = ["condprof"] # Bug 1893058
 
 ["test_certs.js"]
 
@@ -38,3 +39,5 @@ skip-if = ["condprof"]  # Bug 1769154 - expected fail w/condprof
 ["test_security_settings.js"]
 
 ["test_storage_permission.js"]
+
+["test_storage_permission_clearing.js"]

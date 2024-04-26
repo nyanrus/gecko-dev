@@ -322,29 +322,28 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     return;
   }
 
-  nsFrameLoader* frameLoader = FrameLoader();
-  bool isRemoteFrame = frameLoader && frameLoader->IsRemoteFrame();
-
-  // If we are pointer-events:none then we don't need to HitTest background
   const bool pointerEventsNone =
       Style()->PointerEvents() == StylePointerEvents::None;
-  if (!aBuilder->IsForEventDelivery() || !pointerEventsNone) {
-    nsDisplayListCollection decorations(aBuilder);
-    DisplayBorderBackgroundOutline(aBuilder, decorations);
-    if (isRemoteFrame) {
-      // Wrap background colors of <iframe>s with remote subdocuments in their
-      // own layer so we generate a ColorLayer. This is helpful for optimizing
-      // compositing; we can skip compositing the ColorLayer when the
-      // remote content is opaque.
-      WrapBackgroundColorInOwnLayer(aBuilder, this,
-                                    decorations.BorderBackground());
-    }
-    decorations.MoveTo(aLists);
-  }
-
   if (aBuilder->IsForEventDelivery() && pointerEventsNone) {
+    // If we are pointer-events:none then we don't need to HitTest background or
+    // anything else.
     return;
   }
+
+  nsFrameLoader* frameLoader = FrameLoader();
+  const bool isRemoteFrame = frameLoader && frameLoader->IsRemoteFrame();
+
+  nsDisplayListCollection decorations(aBuilder);
+  DisplayBorderBackgroundOutline(aBuilder, decorations);
+  if (isRemoteFrame) {
+    // Wrap background colors of <iframe>s with remote subdocuments in their
+    // own layer so we generate a ColorLayer. This is helpful for optimizing
+    // compositing; we can skip compositing the ColorLayer when the
+    // remote content is opaque.
+    WrapBackgroundColorInOwnLayer(aBuilder, this,
+                                  decorations.BorderBackground());
+  }
+  decorations.MoveTo(aLists);
 
   if (HidesContent()) {
     return;
@@ -555,7 +554,6 @@ nsresult nsSubDocumentFrame::GetFrameName(nsAString& aResult) const {
 /* virtual */
 nscoord nsSubDocumentFrame::GetMinISize(gfxContext* aRenderingContext) {
   nscoord result;
-  DISPLAY_MIN_INLINE_SIZE(this, result);
 
   nsCOMPtr<nsIObjectLoadingContent> iolc = do_QueryInterface(mContent);
   auto olc = static_cast<nsObjectLoadingContent*>(iolc.get());
@@ -575,18 +573,13 @@ nscoord nsSubDocumentFrame::GetMinISize(gfxContext* aRenderingContext) {
 
 /* virtual */
 nscoord nsSubDocumentFrame::GetPrefISize(gfxContext* aRenderingContext) {
-  nscoord result;
-  DISPLAY_PREF_INLINE_SIZE(this, result);
-
   // If the subdocument is an SVG document, then in theory we want to return
   // the same thing that SVGOuterSVGFrame::GetPrefISize does.  That method
   // has some special handling of percentage values to avoid unhelpful zero
   // sizing in the presence of orthogonal writing modes.  We don't bother
   // with that for SVG documents in <embed> and <object>, since that special
   // handling doesn't look up across document boundaries anyway.
-  result = GetIntrinsicISize();
-
-  return result;
+  return GetIntrinsicISize();
 }
 
 /* virtual */
@@ -676,7 +669,6 @@ void nsSubDocumentFrame::Reflow(nsPresContext* aPresContext,
                                 nsReflowStatus& aStatus) {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsSubDocumentFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aDesiredSize, aStatus);
   MOZ_ASSERT(aStatus.IsEmpty(), "Caller should pass a fresh reflow status!");
   NS_FRAME_TRACE(
       NS_FRAME_TRACE_CALLS,
@@ -713,7 +705,7 @@ void nsSubDocumentFrame::Reflow(nsPresContext* aPresContext,
 
     nsViewManager* vm = mInnerView->GetViewManager();
     vm->MoveViewTo(mInnerView, destRect.x, destRect.y);
-    vm->ResizeView(mInnerView, nsRect(nsPoint(0, 0), destRect.Size()), true);
+    vm->ResizeView(mInnerView, nsRect(nsPoint(0, 0), destRect.Size()));
   }
 
   aDesiredSize.SetOverflowAreasToDesiredBounds();

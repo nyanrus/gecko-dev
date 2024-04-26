@@ -34,12 +34,6 @@
     }                                                 \
   });
 
-// Disable the C++ 2a warning. See bug #1509926
-#if defined(__clang__) && (__clang_major__ >= 6)
-#  pragma clang diagnostic push
-#  pragma clang diagnostic ignored "-Wc++2a-compat"
-#endif
-
 namespace TestStrings {
 
 using mozilla::BlackBox;
@@ -2268,6 +2262,30 @@ TEST_F(Strings, printf) {
     create_printf_strings(format, (char*)anotherString);
     verify_printf_strings(expectedOutput);
   }
+  {
+    const char* format = "RightJustify %8s";
+    const char* expectedOutput = "RightJustify      foo";
+    create_printf_strings(format, "foo");
+    verify_printf_strings(expectedOutput);
+  }
+  {
+    const char* format = "LeftJustify %-8s";
+    const char* expectedOutput = "LeftJustify foo     ";
+    create_printf_strings(format, "foo");
+    verify_printf_strings(expectedOutput);
+  }
+  {
+    const char* format = "RightJustify2 %*s";
+    const char* expectedOutput = "RightJustify2      foo";
+    create_printf_strings(format, 8, "foo");
+    verify_printf_strings(expectedOutput);
+  }
+  {
+    const char* format = "LeftJustify2 %-*s";
+    const char* expectedOutput = "LeftJustify2 foo     ";
+    create_printf_strings(format, 8, "foo");
+    verify_printf_strings(expectedOutput);
+  }
 }
 
 // We don't need these macros following the printf test.
@@ -2795,7 +2813,3 @@ static_assert(*testStringA.EndReading() == 0);
 static_assert(testStringA.EndReading() - testStringA.BeginReading() == 1);
 
 }  // namespace TestStrings
-
-#if defined(__clang__) && (__clang_major__ >= 6)
-#  pragma clang diagnostic pop
-#endif

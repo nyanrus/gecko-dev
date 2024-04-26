@@ -335,7 +335,10 @@ class nsHttpChannel final : public HttpBaseChannel,
   void OnHTTPSRRAvailable(nsIDNSHTTPSSVCRecord* aRecord);
   [[nodiscard]] nsresult Connect();
   void SpeculativeConnect();
-  [[nodiscard]] nsresult SetupTransaction();
+  [[nodiscard]] nsresult SetupChannelForTransaction();
+  [[nodiscard]] nsresult InitTransaction();
+  [[nodiscard]] nsresult DispatchTransaction(
+      HttpTransactionShell* aTransWithStickyConn);
   [[nodiscard]] nsresult CallOnStartRequest();
   [[nodiscard]] nsresult ProcessResponse();
   void AsyncContinueProcessResponse();
@@ -565,6 +568,8 @@ class nsHttpChannel final : public HttpBaseChannel,
   void PerformBackgroundCacheRevalidation();
   // This method can only be called on the main thread.
   void PerformBackgroundCacheRevalidationNow();
+
+  void SetPriorityHeader();
 
  private:
   nsCOMPtr<nsICancelable> mProxyRequest;

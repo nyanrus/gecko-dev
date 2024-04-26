@@ -67,8 +67,12 @@ global.openOptionsPage = extension => {
     return Promise.reject({ message: "No browser window available" });
   }
 
-  if (extension.manifest.options_ui.open_in_tab) {
-    window.switchToTabHavingURI(extension.manifest.options_ui.page, true, {
+  const { optionsPageProperties } = extension;
+  if (!optionsPageProperties) {
+    return Promise.reject({ message: "No options page" });
+  }
+  if (optionsPageProperties.open_in_tab) {
+    window.switchToTabHavingURI(optionsPageProperties.page, true, {
       triggeringPrincipal: extension.principal,
     });
     return Promise.resolve();
@@ -78,7 +82,7 @@ global.openOptionsPage = extension => {
     extension.id
   )}/preferences`;
 
-  return window.BrowserOpenAddonsMgr(viewId);
+  return window.BrowserAddonUI.openAddonsMgr(viewId);
 };
 
 global.makeWidgetId = id => {

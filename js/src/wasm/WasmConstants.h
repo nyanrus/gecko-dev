@@ -994,6 +994,19 @@ struct BuiltinModuleIds {
 
 WASM_DECLARE_CACHEABLE_POD(BuiltinModuleIds)
 
+enum class StackSwitchKind {
+  SwitchToSuspendable,
+  SwitchToMain,
+  ContinueOnSuspendable,
+};
+
+enum class UpdateSuspenderStateAction {
+  Enter,
+  Suspend,
+  Resume,
+  Leave,
+};
+
 enum class MozOp {
   // ------------------------------------------------------------------------
   // These operators are emitted internally when compiling asm.js and are
@@ -1040,6 +1053,8 @@ enum class MozOp {
   // Call a builtin module funcs. The operator has argument leb u32 to specify
   // particular operation id. See BuiltinModuleFuncId above.
   CallBuiltinModuleFunc,
+
+  StackSwitch,
 
   Limit
 };
@@ -1092,6 +1107,7 @@ struct OpBytes {
 
 static const char NameSectionName[] = "name";
 static const char SourceMappingURLSectionName[] = "sourceMappingURL";
+static const char BranchHintingSectionName[] = "metadata.code.branch_hint";
 
 enum class NameType { Module = 0, Function = 1, Local = 2 };
 
@@ -1151,6 +1167,7 @@ static_assert(uint64_t(MaxArrayPayloadBytes) <
 static const unsigned MaxTryTableCatches = 10000;
 static const unsigned MaxBrTableElems = 1000000;
 static const unsigned MaxCodeSectionBytes = MaxModuleBytes;
+static const unsigned MaxBranchHintValue = 2;
 
 // 512KiB should be enough, considering how Rabaldr uses the stack and
 // what the standard limits are:
@@ -1162,6 +1179,21 @@ static const unsigned MaxCodeSectionBytes = MaxModuleBytes;
 // At sizeof(int64) bytes per slot this works out to about 480KiB.
 
 static const unsigned MaxFrameSize = 512 * 1024;
+
+// Limit for the amount of stacks present in the runtime.
+static const size_t SuspendableStacksMaxCount = 100;
+
+// Max size of an allocated stack.
+static const size_t SuspendableStackSize = 0x100000;
+
+// Size of additional space at the top of a suspendable stack.
+// The space is allocated to C++ handlers such as error/trap handlers,
+// or stack snapshots utilities.
+static const size_t SuspendableRedZoneSize = 0x6000;
+
+// Total size of a suspendable stack to be reserved.
+static constexpr size_t SuspendableStackPlusRedZoneSize =
+    SuspendableStackSize + SuspendableRedZoneSize;
 
 // Asserted by Decoder::readVarU32.
 

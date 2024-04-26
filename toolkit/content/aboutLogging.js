@@ -114,7 +114,7 @@ const gLoggingPresets = {
   },
   "media-playback": {
     modules:
-      "HTMLMediaElement:4,HTMLMediaElementEvents:4,cubeb:5,PlatformDecoderModule:5,AudioSink:5,AudioSinkWrapper:5,MediaDecoderStateMachine:4,MediaDecoder:4,MediaFormatReader:5,GMP:5",
+      "HTMLMediaElement:4,HTMLMediaElementEvents:4,cubeb:5,PlatformDecoderModule:5,AudioSink:5,AudioSinkWrapper:5,MediaDecoderStateMachine:4,MediaDecoder:4,MediaFormatReader:5,GMP:5,EME:5",
     l10nIds: {
       label: "about-logging-preset-media-playback-label",
       description: "about-logging-preset-media-playback-description",
@@ -234,7 +234,7 @@ function populatePresets() {
   $("#log-modules").value = gLoggingPresets[dropdown.value].modules;
   setPresetAndDescription(dropdown.value);
   // When changing the list switch to custom.
-  $("#log-modules").oninput = e => {
+  $("#log-modules").oninput = () => {
     dropdown.value = "custom";
   };
 }
@@ -534,7 +534,7 @@ function updateLogFile(file) {
 
     if (file.exists()) {
       openLogFileButton.disabled = false;
-      openLogFileButton.onclick = function (e) {
+      openLogFileButton.onclick = function () {
         file.reveal();
       };
     }

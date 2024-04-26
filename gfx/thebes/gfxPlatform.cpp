@@ -21,8 +21,8 @@
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/GPUProcessManager.h"
 #include "mozilla/gfx/GraphicsMessages.h"
-#include "mozilla/gfx/CanvasManagerChild.h"
 #include "mozilla/gfx/CanvasRenderThread.h"
+#include "mozilla/gfx/CanvasShutdownManager.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/EnumTypeTraits.h"
@@ -445,8 +445,7 @@ gfxPlatform::gfxPlatform()
       mDisplayInfoCollector(this, &gfxPlatform::GetDisplayInfo),
       mOverlayInfoCollector(this, &gfxPlatform::GetOverlayInfo),
       mSwapChainInfoCollector(this, &gfxPlatform::GetSwapChainInfo),
-      mCompositorBackend(layers::LayersBackend::LAYERS_NONE),
-      mScreenDepth(0) {
+      mCompositorBackend(layers::LayersBackend::LAYERS_NONE) {
   mAllowDownloadableFonts = UNINITIALIZED_VALUE;
 
   InitBackendPrefs(GetBackendPrefs());
@@ -1064,6 +1063,13 @@ void gfxPlatform::ReportTelemetry() {
     mozilla::glean::gfx_display::count.Set(screenCount);
     mozilla::glean::gfx_display::primary_height.Set(rect.Height());
     mozilla::glean::gfx_display::primary_width.Set(rect.Width());
+
+    // Check if any screen known by screenManager supports HDR.
+    bool supportsHDR = false;
+    for (const auto& screen : screenManager.CurrentScreenList()) {
+      supportsHDR |= screen->GetIsHDR();
+    }
+    Telemetry::ScalarSet(Telemetry::ScalarID::GFX_SUPPORTS_HDR, supportsHDR);
   }
 
   nsString adapterDesc;
@@ -1120,10 +1126,6 @@ void gfxPlatform::ReportTelemetry() {
       NS_ConvertUTF16toUTF8(adapterDriverDate));
 
   mozilla::glean::gfx_status::headless.Set(IsHeadless());
-
-  MOZ_ASSERT(gPlatform, "Need gPlatform to generate some telemetry.");
-  Telemetry::ScalarSet(Telemetry::ScalarID::GFX_SUPPORTS_HDR,
-                       gPlatform->SupportsHDR());
 }
 
 static bool IsFeatureSupported(long aFeature, bool aDefault) {
@@ -1343,7 +1345,7 @@ void gfxPlatform::ShutdownLayersIPC() {
 
   if (XRE_IsContentProcess()) {
     gfx::VRManagerChild::ShutDown();
-    gfx::CanvasManagerChild::Shutdown();
+    gfx::CanvasShutdownManager::Shutdown();
     // cf bug 1215265.
     if (StaticPrefs::layers_child_process_shutdown()) {
       layers::CompositorManagerChild::Shutdown();
@@ -1354,7 +1356,7 @@ void gfxPlatform::ShutdownLayersIPC() {
     VideoBridgeParent::Shutdown();
     RDDProcessManager::RDDProcessShutdown();
     gfx::VRManagerChild::ShutDown();
-    gfx::CanvasManagerChild::Shutdown();
+    gfx::CanvasShutdownManager::Shutdown();
     layers::CompositorManagerChild::Shutdown();
     layers::ImageBridgeChild::ShutDown();
     // This could be running on either the Compositor thread, the Renderer
@@ -1607,6 +1609,12 @@ already_AddRefed<DataSourceSurface> gfxPlatform::GetWrappedDataSourceSurface(
 }
 
 void gfxPlatform::PopulateScreenInfo() {
+  // We're only going to set some gfxVars here, which is only possible from
+  // the parent process.
+  if (!XRE_IsParentProcess()) {
+    return;
+  }
+
   nsCOMPtr<nsIScreenManager> manager =
       do_GetService("@mozilla.org/gfx/screenmanager;1");
   MOZ_ASSERT(manager, "failed to get nsIScreenManager");
@@ -1618,13 +1626,9 @@ void gfxPlatform::PopulateScreenInfo() {
     return;
   }
 
-  screen->GetColorDepth(&mScreenDepth);
-  if (XRE_IsParentProcess()) {
-    gfxVars::SetScreenDepth(mScreenDepth);
-  }
-
-  int left, top;
-  screen->GetRect(&left, &top, &mScreenSize.width, &mScreenSize.height);
+  int32_t screenDepth;
+  screen->GetColorDepth(&screenDepth);
+  gfxVars::SetPrimaryScreenDepth(screenDepth);
 }
 
 bool gfxPlatform::SupportsAzureContentForDrawTarget(DrawTarget* aTarget) {
@@ -3158,6 +3162,13 @@ void gfxPlatform::InitWebGPUConfig() {
 #endif
 
   gfxVars::SetAllowWebGPU(feature.IsEnabled());
+
+#if XP_WIN
+  if (IsWin10CreatorsUpdateOrLater() &&
+      StaticPrefs::dom_webgpu_allow_present_without_readback()) {
+    gfxVars::SetAllowWebGPUPresentWithoutReadback(true);
+  }
+#endif
 }
 
 #ifdef XP_WIN
@@ -3707,8 +3718,7 @@ uint32_t gfxPlatform::TargetFrameRate() {
 
 /* static */
 bool gfxPlatform::UseDesktopZoomingScrollbars() {
-  return StaticPrefs::apz_allow_zooming() &&
-         !StaticPrefs::apz_force_disable_desktop_zooming_scrollbars();
+  return StaticPrefs::apz_allow_zooming();
 }
 
 /*static*/

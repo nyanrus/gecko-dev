@@ -5,7 +5,7 @@
 import {
   actionTypes as at,
   actionCreators as ac,
-} from "resource://activity-stream/common/Actions.sys.mjs";
+} from "resource://activity-stream/common/Actions.mjs";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 export const PREFERENCES_LOADED_EVENT = "home-pane-loaded";
@@ -74,7 +74,7 @@ export class AboutPreferences {
         break;
       // This is used to open the web extension settings page for an extension
       case at.OPEN_WEBEXT_SETTINGS:
-        action._target.browser.ownerGlobal.BrowserOpenAddonsMgr(
+        action._target.browser.ownerGlobal.BrowserAddonUI.openAddonsMgr(
           `addons://detail/${encodeURIComponent(action.data)}`
         );
         break;

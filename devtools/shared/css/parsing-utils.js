@@ -23,7 +23,6 @@ loader.lazyRequireGetter(
 const SELECTOR_ATTRIBUTE = (exports.SELECTOR_ATTRIBUTE = 1);
 const SELECTOR_ELEMENT = (exports.SELECTOR_ELEMENT = 2);
 const SELECTOR_PSEUDO_CLASS = (exports.SELECTOR_PSEUDO_CLASS = 3);
-const CSS_BLOCKS = { "(": ")", "[": "]" };
 
 // When commenting out a declaration, we put this character into the
 // comment opener so that future parses of the commented text know to
@@ -36,18 +35,22 @@ const COMMENT_PARSING_HEURISTIC_BYPASS_CHAR =
  * CSS tokens.  Comment tokens are dropped.
  *
  * @param {String} CSS source string
+ * @param {Boolean} useInspectorCSSParser Set to true to use InspectorCSSParser.
  * @yield {CSSToken} The next CSSToken that is lexed
  * @see CSSToken for details about the returned tokens
  */
-function* cssTokenizer(string) {
-  const lexer = getCSSLexer(string);
+function* cssTokenizer(string, useInspectorCSSParser = false) {
+  const lexer = getCSSLexer(string, useInspectorCSSParser);
   while (true) {
     const token = lexer.nextToken();
     if (!token) {
       break;
     }
     // None of the existing consumers want comments.
-    if (token.tokenType !== "comment") {
+    if (
+      token.tokenType !== "comment" ||
+      (useInspectorCSSParser && token.tokenType !== "Comment")
+    ) {
       yield token;
     }
   }
@@ -73,7 +76,7 @@ function* cssTokenizer(string) {
  *        line and column information.
  */
 function cssTokenizerWithLineColumn(string) {
-  const lexer = getCSSLexer(string);
+  const lexer = getCSSLexer(string, true);
   const result = [];
   let prevToken = undefined;
   while (true) {
@@ -92,7 +95,7 @@ function cssTokenizerWithLineColumn(string) {
       break;
     }
 
-    if (token.tokenType === "comment") {
+    if (token.tokenType === "Comment") {
       // We've already dealt with the previous token's location.
       prevToken = undefined;
     } else {
@@ -296,7 +299,7 @@ function parseDeclarationsInternal(
     throw new Error("empty input string");
   }
 
-  const lexer = getCSSLexer(inputString);
+  const lexer = getCSSLexer(inputString, true, true);
 
   let declarations = [getEmptyDeclaration()];
   let lastProp = declarations[0];
@@ -340,7 +343,7 @@ function parseDeclarationsInternal(
 
     // Update the start and end offsets of the declaration, but only
     // when we see a significant token.
-    if (token.tokenType !== "whitespace" && token.tokenType !== "comment") {
+    if (token.tokenType !== "WhiteSpace" && token.tokenType !== "Comment") {
       if (lastProp.offsets[0] === undefined) {
         lastProp.offsets[0] = token.startOffset;
       }
@@ -361,9 +364,8 @@ function parseDeclarationsInternal(
     if (
       // If we're not already in a nested rule
       !isInNested &&
-      token.tokenType === "symbol" &&
       // and there's an opening curly bracket
-      token.text == "{" &&
+      token.tokenType === "CurlyBracketBlock" &&
       // and we're not inside a function or an attribute
       !currentBlocks.length
     ) {
@@ -373,13 +375,10 @@ function parseDeclarationsInternal(
 
       continue;
     } else if (isInNested) {
-      if (token.tokenType === "symbol") {
-        if (token.text == "{") {
-          nestingLevel++;
-        }
-        if (token.text == "}") {
-          nestingLevel--;
-        }
+      if (token.tokenType == "CurlyBracketBlock") {
+        nestingLevel++;
+      } else if (token.tokenType == "CloseCurlyBracket") {
+        nestingLevel--;
       }
 
       // If we were in a nested rule, and we saw the last closing curly bracket,
@@ -392,21 +391,24 @@ function parseDeclarationsInternal(
       }
       continue;
     } else if (
-      token.tokenType === "symbol" &&
-      CSS_BLOCKS[currentBlocks.at(-1)] === token.text
+      token.tokenType === "CloseParenthesis" ||
+      token.tokenType === "CloseSquareBracket"
     ) {
       // Closing the last block that was opened.
       currentBlocks.pop();
       current += token.text;
-    } else if (token.tokenType === "symbol" && CSS_BLOCKS[token.text]) {
+    } else if (
+      token.tokenType === "ParenthesisBlock" ||
+      token.tokenType === "SquareBracketBlock"
+    ) {
       // Opening a new block.
       currentBlocks.push(token.text);
       current += token.text;
-    } else if (token.tokenType === "function") {
+    } else if (token.tokenType === "Function") {
       // Opening a function is like opening a new block, so push one to the stack.
       currentBlocks.push("(");
-      current += token.text + "(";
-    } else if (token.tokenType === "symbol" && token.text === ":") {
+      current += token.text;
+    } else if (token.tokenType === "Colon") {
       // Either way, a "!important" we've seen is no longer valid now.
       importantState = 0;
       importantWS = false;
@@ -432,11 +434,7 @@ function parseDeclarationsInternal(
         // with colons)
         current += ":";
       }
-    } else if (
-      token.tokenType === "symbol" &&
-      token.text === ";" &&
-      !currentBlocks.length
-    ) {
+    } else if (token.tokenType === "Semicolon" && !currentBlocks.length) {
       lastProp.terminator = "";
       // When parsing a comment, if the name hasn't been set, then we
       // have probably just seen an ordinary semicolon used in text,
@@ -456,7 +454,7 @@ function parseDeclarationsInternal(
       }
       lastProp.value = cssTrim(current);
       resetStateForNextDeclaration();
-    } else if (token.tokenType === "ident") {
+    } else if (token.tokenType === "Ident") {
       if (token.text === "important" && importantState === 1) {
         importantState = 2;
       } else {
@@ -471,17 +469,15 @@ function parseDeclarationsInternal(
           importantState = 0;
           importantWS = false;
         }
-        // Re-escape the token to avoid dequoting problems.
-        // See bug 1287620.
-        current += CSS.escape(token.text);
+        current += token.text;
       }
-    } else if (token.tokenType === "symbol" && token.text === "!") {
+    } else if (token.tokenType === "Delim" && token.text === "!") {
       importantState = 1;
-    } else if (token.tokenType === "whitespace") {
+    } else if (token.tokenType === "WhiteSpace") {
       if (current !== "") {
         current = current.trimEnd() + " ";
       }
-    } else if (token.tokenType === "comment") {
+    } else if (token.tokenType === "Comment") {
       if (parseComments && !lastProp.name && !lastProp.value) {
         const commentText = inputString.substring(
           token.startOffset + 2,
@@ -644,15 +640,21 @@ function parsePseudoClassesAndAttributes(value) {
     throw new Error("empty input string");
   }
 
-  const tokens = cssTokenizer(value);
+  // See InspectorCSSToken dictionnary in InspectorUtils.webidl for more information
+  // about the tokens.
+  const tokensIterator = cssTokenizer(
+    value,
+    // useInspectorCSSParser
+    true
+  );
   const result = [];
   let current = "";
   let functionCount = 0;
   let hasAttribute = false;
   let hasColon = false;
 
-  for (const token of tokens) {
-    if (token.tokenType === "ident") {
+  for (const token of tokensIterator) {
+    if (token.tokenType === "Ident") {
       current += value.substring(token.startOffset, token.endOffset);
 
       if (hasColon && !functionCount) {
@@ -663,7 +665,7 @@ function parsePseudoClassesAndAttributes(value) {
         current = "";
         hasColon = false;
       }
-    } else if (token.tokenType === "symbol" && token.text === ":") {
+    } else if (token.tokenType === "Colon") {
       if (!hasColon) {
         if (current) {
           result.push({ value: current, type: SELECTOR_ELEMENT });
@@ -674,10 +676,10 @@ function parsePseudoClassesAndAttributes(value) {
       }
 
       current += token.text;
-    } else if (token.tokenType === "function") {
+    } else if (token.tokenType === "Function") {
       current += value.substring(token.startOffset, token.endOffset);
       functionCount++;
-    } else if (token.tokenType === "symbol" && token.text === ")") {
+    } else if (token.tokenType === "CloseParenthesis") {
       current += token.text;
 
       if (hasColon && functionCount == 1) {
@@ -691,7 +693,7 @@ function parsePseudoClassesAndAttributes(value) {
       } else {
         functionCount--;
       }
-    } else if (token.tokenType === "symbol" && token.text === "[") {
+    } else if (token.tokenType === "SquareBracketBlock") {
       if (!hasAttribute && !functionCount) {
         if (current) {
           result.push({ value: current, type: SELECTOR_ELEMENT });
@@ -702,7 +704,7 @@ function parsePseudoClassesAndAttributes(value) {
       }
 
       current += token.text;
-    } else if (token.tokenType === "symbol" && token.text === "]") {
+    } else if (token.tokenType === "CloseSquareBracket") {
       current += token.text;
 
       if (hasAttribute && !functionCount) {

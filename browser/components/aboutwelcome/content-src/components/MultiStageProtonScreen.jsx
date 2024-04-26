@@ -311,7 +311,10 @@ export class ProtonScreen extends React.PureComponent {
           />
         ) : null}
         {content.tiles && content.tiles.type === "migration-wizard" ? (
-          <EmbeddedMigrationWizard handleAction={this.props.handleAction} />
+          <EmbeddedMigrationWizard
+            handleAction={this.props.handleAction}
+            content={content}
+          />
         ) : null}
       </React.Fragment>
     );
@@ -500,6 +503,7 @@ export class ProtonScreen extends React.PureComponent {
       <main
         className={`screen ${this.props.id || ""}
           ${screenClassName} ${textColorClass}`}
+        reverse-split={content.reverse_split ? "" : null}
         role={ariaRole ?? "alertdialog"}
         layout={content.layout}
         pos={content.position || "center"}
@@ -508,6 +512,7 @@ export class ProtonScreen extends React.PureComponent {
         ref={input => {
           this.mainContentHeader = input;
         }}
+        no-rdm={content.no_rdm ? "" : null}
       >
         {isCenterPosition ? null : this.renderSecondarySection(content)}
         <div
@@ -541,6 +546,12 @@ export class ProtonScreen extends React.PureComponent {
                 content.width && content.position !== "split"
                   ? content.width
                   : null,
+              paddingBlock: content.split_content_padding_block
+                ? content.split_content_padding_block
+                : null,
+              paddingInline: content.split_content_padding_inline
+                ? content.split_content_padding_inline
+                : null,
             }}
           >
             {content.logo ? this.renderPicture(content.logo) : null}
@@ -559,32 +570,39 @@ export class ProtonScreen extends React.PureComponent {
               </div>
             ) : null}
 
-            <div className="main-content-inner">
-              <div className={`welcome-text ${content.title_style || ""}`}>
-                {content.title ? this.renderTitle(content) : null}
+            <div
+              className="main-content-inner"
+              style={{
+                justifyContent: content.split_content_justify_content,
+              }}
+            >
+              {content.title || content.subtitle ? (
+                <div className={`welcome-text ${content.title_style || ""}`}>
+                  {content.title ? this.renderTitle(content) : null}
 
-                {content.subtitle ? (
-                  <Localized text={content.subtitle}>
-                    <h2
-                      data-l10n-args={JSON.stringify({
-                        "addon-name": this.props.addonName,
-                        ...this.props.appAndSystemLocaleInfo?.displayNames,
-                      })}
-                      aria-flowto={
-                        this.props.messageId?.includes("FEATURE_TOUR")
-                          ? "steps"
-                          : ""
-                      }
+                  {content.subtitle ? (
+                    <Localized text={content.subtitle}>
+                      <h2
+                        data-l10n-args={JSON.stringify({
+                          "addon-name": this.props.addonName,
+                          ...this.props.appAndSystemLocaleInfo?.displayNames,
+                        })}
+                        aria-flowto={
+                          this.props.messageId?.includes("FEATURE_TOUR")
+                            ? "steps"
+                            : ""
+                        }
+                      />
+                    </Localized>
+                  ) : null}
+                  {content.cta_paragraph ? (
+                    <CTAParagraph
+                      content={content.cta_paragraph}
+                      handleAction={this.props.handleAction}
                     />
-                  </Localized>
-                ) : null}
-                {content.cta_paragraph ? (
-                  <CTAParagraph
-                    content={content.cta_paragraph}
-                    handleAction={this.props.handleAction}
-                  />
-                ) : null}
-              </div>
+                  ) : null}
+                </div>
+              ) : null}
               {content.video_container ? (
                 <OnboardingVideo
                   content={content.video_container}

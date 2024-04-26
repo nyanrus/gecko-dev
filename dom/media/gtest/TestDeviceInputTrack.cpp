@@ -87,7 +87,7 @@ TEST_F(TestDeviceInputTrack, DeviceInputConsumerTrack) {
   class TestDeviceInputConsumerTrack : public DeviceInputConsumerTrack {
    public:
     static TestDeviceInputConsumerTrack* Create(MediaTrackGraph* aGraph) {
-      MOZ_ASSERT(NS_IsMainThread());
+      MOZ_RELEASE_ASSERT(NS_IsMainThread());
       TestDeviceInputConsumerTrack* track =
           new TestDeviceInputConsumerTrack(aGraph->GraphRate());
       aGraph->AddTrack(track);
@@ -95,7 +95,7 @@ TEST_F(TestDeviceInputTrack, DeviceInputConsumerTrack) {
     }
 
     void Destroy() {
-      MOZ_ASSERT(NS_IsMainThread());
+      MOZ_RELEASE_ASSERT(NS_IsMainThread());
       DisconnectDeviceInput();
       DeviceInputConsumerTrack::Destroy();
     }
@@ -108,7 +108,7 @@ TEST_F(TestDeviceInputTrack, DeviceInputConsumerTrack) {
         return 0;
       }
       DeviceInputTrack* t = mInputs[0]->GetSource()->AsDeviceInputTrack();
-      MOZ_ASSERT(t);
+      MOZ_RELEASE_ASSERT(t);
       return t->NumberOfChannels();
     }
 
@@ -150,16 +150,16 @@ TEST_F(TestDeviceInputTrack, DeviceInputConsumerTrack) {
   RefPtr<TestDeviceInputConsumerTrack> track1 =
       TestDeviceInputConsumerTrack::Create(mGraph);
   track1->ConnectDeviceInput(device1, listener1.get(), testPrincipal);
-  EXPECT_TRUE(track1->ConnectToNativeDevice());
-  EXPECT_FALSE(track1->ConnectToNonNativeDevice());
+  EXPECT_TRUE(track1->ConnectedToNativeDevice());
+  EXPECT_FALSE(track1->ConnectedToNonNativeDevice());
 
   const CubebUtils::AudioDeviceID device2 = (void*)2;
   RefPtr<TestAudioDataListener> listener2 = new TestAudioDataListener(2, false);
   RefPtr<TestDeviceInputConsumerTrack> track2 =
       TestDeviceInputConsumerTrack::Create(mGraph);
   track2->ConnectDeviceInput(device2, listener2.get(), testPrincipal);
-  EXPECT_FALSE(track2->ConnectToNativeDevice());
-  EXPECT_TRUE(track2->ConnectToNonNativeDevice());
+  EXPECT_FALSE(track2->ConnectedToNativeDevice());
+  EXPECT_TRUE(track2->ConnectedToNonNativeDevice());
 
   track2->Destroy();
   mGraph->RemoveTrackGraphThread(track2);

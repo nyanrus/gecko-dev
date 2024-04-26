@@ -47,7 +47,7 @@ def enable_logging():
 
 @pytest.fixture(scope="session")
 def graph_config():
-    return load_graph_config(os.path.join(GECKO, "taskcluster", "ci"))
+    return load_graph_config(os.path.join(GECKO, "taskcluster"))
 
 
 @pytest.fixture(scope="session")
@@ -151,6 +151,20 @@ class FakeOptimization(OptimizationStrategy):
         return False
 
 
+class FakeTransformConfig:
+    kind = "fake-kind"
+    path = "/root/ci/fake-kind"
+    config = {}
+    params = FakeParameters()
+    kind_dependencies_tasks = {}
+    graph_config = {}
+    write_artifacts = False
+
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+
 @pytest.fixture
 def maketgg(monkeypatch):
     def inner(target_tasks=None, kinds=[("_fake", [])], params=None):
@@ -195,12 +209,16 @@ def maketgg(monkeypatch):
 @pytest.fixture
 def run_transform():
     graph_config = fake_load_graph_config("/root")
-    kind = FakeKind.create("fake", {}, graph_config)
+    config = FakeTransformConfig(graph_config=graph_config)
 
-    def inner(xform, tasks):
+    def inner(xform, tasks, **extra_config):
+        if extra_config:
+            for k, v in extra_config.items():
+                setattr(config, k, v)
+
         if isinstance(tasks, dict):
             tasks = [tasks]
-        return xform(kind.config, tasks)
+        return xform(config, tasks)
 
     return inner
 

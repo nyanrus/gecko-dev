@@ -8,6 +8,7 @@ use api::MAX_RENDER_TASK_SIZE;
 use api::units::*;
 use crate::clip::{ClipDataStore, ClipItemKind, ClipStore, ClipNodeRange};
 use crate::command_buffer::{CommandBufferIndex, QuadFlags};
+use crate::pattern::{PatternKind, PatternShaderInput};
 use crate::spatial_tree::SpatialNodeIndex;
 use crate::filterdata::SFilterData;
 use crate::frame_builder::FrameBuilderConfig;
@@ -184,10 +185,11 @@ pub struct EmptyTask {
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct PrimTask {
+    pub pattern: PatternKind,
+    pub pattern_input: PatternShaderInput,
     pub device_pixel_scale: DevicePixelScale,
     pub content_origin: DevicePoint,
     pub prim_address_f: GpuBufferAddress,
-    pub prim_spatial_node_index: SpatialNodeIndex,
     pub raster_spatial_node_index: SpatialNodeIndex,
     pub transform_id: TransformPaletteId,
     pub edge_flags: EdgeAaSegmentMask,
@@ -516,7 +518,8 @@ impl RenderTaskKind {
     }
 
     pub fn new_prim(
-        prim_spatial_node_index: SpatialNodeIndex,
+        pattern: PatternKind,
+        pattern_input: PatternShaderInput,
         raster_spatial_node_index: SpatialNodeIndex,
         device_pixel_scale: DevicePixelScale,
         content_origin: DevicePoint,
@@ -528,7 +531,8 @@ impl RenderTaskKind {
         prim_needs_scissor_rect: bool,
     ) -> Self {
         RenderTaskKind::Prim(PrimTask {
-            prim_spatial_node_index,
+            pattern,
+            pattern_input,
             raster_spatial_node_index,
             device_pixel_scale,
             content_origin,
@@ -940,9 +944,7 @@ impl RenderTask {
         size: DeviceIntSize,
         kind: RenderTaskKind,
     ) -> Self {
-        if size.is_empty() {
-            log::warn!("Bad {} render task size: {:?}", kind.as_str(), size);
-        }
+        assert!(!size.is_empty(), "Bad {} render task size: {:?}", kind.as_str(), size);
         RenderTask::new(
             RenderTaskLocation::Unallocated { size },
             kind,

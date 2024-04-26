@@ -468,6 +468,7 @@ already_AddRefed<CacheStorage> WorkerGlobalScope::GetCaches(ErrorResult& aRv) {
   if (!mCacheStorage) {
     mCacheStorage = CacheStorage::CreateOnWorker(cache::DEFAULT_NAMESPACE, this,
                                                  mWorkerPrivate, aRv);
+    mWorkerPrivate->NotifyStorageKeyUsed();
   }
 
   RefPtr<CacheStorage> ref = mCacheStorage;
@@ -721,7 +722,7 @@ void WorkerGlobalScope::GetJSTestingFunctions(
 }
 
 already_AddRefed<Promise> WorkerGlobalScope::Fetch(
-    const RequestOrUSVString& aInput, const RequestInit& aInit,
+    const RequestOrUTF8String& aInput, const RequestInit& aInit,
     CallerType aCallerType, ErrorResult& aRv) {
   return FetchRequest(this, aInput, aInit, aCallerType, aRv);
 }
@@ -762,6 +763,8 @@ already_AddRefed<IDBFactory> WorkerGlobalScope::GetIndexedDB(
     indexedDB = res.unwrap();
     mIndexedDB = indexedDB;
   }
+
+  mWorkerPrivate->NotifyStorageKeyUsed();
 
   return indexedDB.forget();
 }

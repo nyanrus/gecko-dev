@@ -426,6 +426,51 @@ describe("MultiStageAboutWelcomeProton module", () => {
 
       sandbox.restore();
     });
+
+    it("should not have no-rdm property when property is not in message content", () => {
+      const SCREEN_PROPS = {
+        content: {
+          title: "test title",
+          layout: "inline",
+        },
+      };
+      const wrapper = mount(<MultiStageProtonScreen {...SCREEN_PROPS} />);
+      assert.ok(wrapper.exists());
+      assert.notExists(wrapper.find("main").prop("no-rdm"));
+    });
+
+    it("should have no-rdm property when property is set in message content", () => {
+      const SCREEN_PROPS = {
+        content: {
+          title: "test title",
+          layout: "inline",
+          no_rdm: true,
+        },
+      };
+      const wrapper = mount(<MultiStageProtonScreen {...SCREEN_PROPS} />);
+      assert.ok(wrapper.exists());
+      assert.exists(wrapper.find("main").prop("no-rdm"));
+    });
+
+    it("should correctly set reverse-split prop", () => {
+      const SCREEN_PROPS = {
+        content: {
+          position: "split",
+          reverse_split: true,
+          title: "test title",
+          primary_button: {
+            label: "test primary button",
+          },
+          additional_button: {
+            label: "test additional button",
+            style: "link",
+          },
+        },
+      };
+      const wrapper = mount(<MultiStageProtonScreen {...SCREEN_PROPS} />);
+      assert.ok(wrapper.exists());
+      assert.equal(wrapper.find("main").prop("reverse-split"), "");
+    });
   });
 
   describe("AboutWelcomeDefaults for proton", () => {
@@ -606,6 +651,46 @@ describe("MultiStageAboutWelcomeProton module", () => {
         data.screens[0].content.primary_button.action.data,
         "source",
         "test"
+      );
+    });
+  });
+
+  describe("Embedded Migration Wizard", () => {
+    const SCREEN_PROPS = {
+      content: {
+        title: "test title",
+        tiles: {
+          type: "migration-wizard",
+        },
+      },
+    };
+
+    it("should render migration wizard", async () => {
+      const wrapper = mount(<MultiStageProtonScreen {...SCREEN_PROPS} />);
+      assert.ok(wrapper.exists());
+      assert.isTrue(wrapper.find("migration-wizard").exists());
+    });
+  });
+
+  describe("Custom main content inner custom justify content", () => {
+    const SCREEN_PROPS = {
+      content: {
+        title: "test title",
+        position: "split",
+        split_content_justify_content: "flex-start",
+      },
+    };
+
+    it("should render split screen with custom justify-content", async () => {
+      const wrapper = mount(<MultiStageProtonScreen {...SCREEN_PROPS} />);
+      assert.ok(wrapper.exists());
+      assert.equal(wrapper.find("main").prop("pos"), "split");
+      assert.exists(wrapper.find(".main-content-inner"));
+      assert.ok(
+        wrapper
+          .find(".main-content-inner")
+          .prop("style")
+          .justifyContent.includes("flex-start")
       );
     });
   });

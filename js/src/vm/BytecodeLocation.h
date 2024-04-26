@@ -103,6 +103,7 @@ class BytecodeLocation {
 
   inline JSAtom* getAtom(const JSScript* script) const;
   inline JSString* getString(const JSScript* script) const;
+  inline bool atomizeString(JSContext* cx, JSScript* script);
   inline PropertyName* getPropertyName(const JSScript* script) const;
   inline JS::BigInt* getBigInt(const JSScript* script) const;
   inline JSObject* getObject(const JSScript* script) const;
@@ -197,8 +198,6 @@ class BytecodeLocation {
   bool isStrictEqualityOp() const { return IsStrictEqualityOp(getOp()); }
 
   bool isStrictSetOp() const { return IsStrictSetPC(rawBytecode_); }
-
-  bool isNameOp() const { return IsNameOp(getOp()); }
 
   bool isSpreadOp() const { return IsSpreadOp(getOp()); }
 

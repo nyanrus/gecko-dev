@@ -2310,8 +2310,10 @@ mozilla::ipc::IPCResult ContentChild::RecvThemeChanged(
 mozilla::ipc::IPCResult ContentChild::RecvLoadProcessScript(
     const nsString& aURL) {
   auto* global = ContentProcessMessageManager::Get();
-  global->LoadScript(aURL);
-  return IPC_OK();
+  if (global && global->LoadScript(aURL)) {
+    return IPC_OK();
+  }
+  return IPC_FAIL(this, "ContentProcessMessageManager::LoadScript failed");
 }
 
 mozilla::ipc::IPCResult ContentChild::RecvAsyncMessage(
@@ -2779,6 +2781,20 @@ mozilla::ipc::IPCResult ContentChild::RecvNotifyProcessPriorityChanged(
       moz_set_max_dirty_page_modifier(4);
     } else if (mProcessPriority == hal::PROCESS_PRIORITY_BACKGROUND) {
       moz_set_max_dirty_page_modifier(-2);
+
+#if defined(MOZ_MEMORY)
+      if (StaticPrefs::dom_memory_memory_pressure_on_background() == 1) {
+        jemalloc_free_dirty_pages();
+      }
+#endif
+      if (StaticPrefs::dom_memory_memory_pressure_on_background() == 2) {
+        nsCOMPtr<nsIObserverService> obsServ = services::GetObserverService();
+        obsServ->NotifyObservers(nullptr, "memory-pressure", u"heap-minimize");
+      } else if (StaticPrefs::dom_memory_memory_pressure_on_background() == 3) {
+        nsCOMPtr<nsIObserverService> obsServ = services::GetObserverService();
+        obsServ->NotifyObservers(nullptr, "memory-pressure", u"low-memory");
+      }
+
     } else {
       moz_set_max_dirty_page_modifier(0);
     }
@@ -3923,7 +3939,8 @@ mozilla::ipc::IPCResult ContentChild::RecvRaiseWindow(
 
 mozilla::ipc::IPCResult ContentChild::RecvAdjustWindowFocus(
     const MaybeDiscarded<BrowsingContext>& aContext, bool aIsVisible,
-    uint64_t aActionId) {
+    uint64_t aActionId, bool aShouldClearAncestorFocus,
+    const MaybeDiscarded<BrowsingContext>& aAncestorBrowsingContextToFocus) {
   if (aContext.IsNullOrDiscarded()) {
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
             ("ChildIPC: Trying to send a message to dead or detached context"));
@@ -3932,7 +3949,12 @@ mozilla::ipc::IPCResult ContentChild::RecvAdjustWindowFocus(
 
   if (RefPtr<nsFocusManager> fm = nsFocusManager::GetFocusManager()) {
     RefPtr<BrowsingContext> bc = aContext.get();
-    fm->AdjustInProcessWindowFocus(bc, false, aIsVisible, aActionId);
+    RefPtr<BrowsingContext> ancestor =
+        aAncestorBrowsingContextToFocus.IsNullOrDiscarded()
+            ? nullptr
+            : aAncestorBrowsingContextToFocus.get();
+    fm->AdjustInProcessWindowFocus(bc, false, aIsVisible, aActionId,
+                                   aShouldClearAncestorFocus, ancestor);
   }
   return IPC_OK();
 }

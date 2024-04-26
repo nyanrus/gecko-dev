@@ -119,12 +119,12 @@ export var ExtensionsUI = {
 
   showAddonsManager(tabbrowser, strings, icon) {
     let global = tabbrowser.selectedBrowser.ownerGlobal;
-    return global
-      .BrowserOpenAddonsMgr("addons://list/extension")
-      .then(aomWin => {
+    return global.BrowserAddonUI.openAddonsMgr("addons://list/extension").then(
+      aomWin => {
         let aomBrowser = aomWin.docShell.chromeEventHandler;
         return this.showPermissionsPrompt(aomBrowser, strings, icon);
-      });
+      }
+    );
   },
 
   showSideloaded(tabbrowser, addon) {
@@ -185,7 +185,7 @@ export var ExtensionsUI = {
     );
   },
 
-  observe(subject, topic, data) {
+  observe(subject, topic) {
     if (topic == "webextension-permission-prompt") {
       let { target, info } = subject.wrappedJSObject;
 
@@ -338,8 +338,6 @@ export var ExtensionsUI = {
 
   async showPermissionsPrompt(target, strings, icon) {
     let { browser, window } = getTabBrowser(target);
-
-    await window.ensureCustomElements("moz-support-link");
 
     // Wait for any pending prompts to complete before showing the next one.
     let pending;

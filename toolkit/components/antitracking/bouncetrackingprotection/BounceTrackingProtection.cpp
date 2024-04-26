@@ -134,6 +134,11 @@ nsresult BounceTrackingProtection::RecordStatefulBounces(
 
   // For each host in navigable’s bounce tracking record's bounce set:
   for (const nsACString& host : record->GetBounceHosts()) {
+    // Skip "null" entries, they are only used for logging purposes.
+    if (host.EqualsLiteral("null")) {
+      continue;
+    }
+
     // If host equals navigable’s bounce tracking record's initial host,
     // continue.
     if (host == record->GetInitialHost()) {
@@ -222,9 +227,11 @@ nsresult BounceTrackingProtection::RecordStatefulBounces(
 nsresult BounceTrackingProtection::RecordUserActivation(
     nsIPrincipal* aPrincipal) {
   MOZ_ASSERT(XRE_IsParentProcess());
-
   NS_ENSURE_ARG_POINTER(aPrincipal);
-  NS_ENSURE_TRUE(aPrincipal->GetIsContentPrincipal(), NS_ERROR_FAILURE);
+
+  if (!BounceTrackingState::ShouldTrackPrincipal(aPrincipal)) {
+    return NS_OK;
+  }
 
   nsAutoCString siteHost;
   nsresult rv = aPrincipal->GetBaseDomain(siteHost);
@@ -585,11 +592,17 @@ nsresult BounceTrackingProtection::PurgeBounceTrackersForStateGlobal(
             ("%s: Purge state for host: %s", __FUNCTION__,
              PromiseFlatCString(host).get()));
 
-    // TODO: Bug 1842067: Clear by site + OA.
-    rv = clearDataService->DeleteDataFromBaseDomain(host, false,
-                                                    TRACKER_PURGE_FLAGS, cb);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      clearPromise->Reject(0, __func__);
+    if (StaticPrefs::privacy_bounceTrackingProtection_enableDryRunMode()) {
+      // In dry-run mode, we don't actually clear the data, but we still want to
+      // resolve the promise to indicate that the data would have been cleared.
+      clearPromise->Resolve(host, __func__);
+    } else {
+      // TODO: Bug 1842067: Clear by site + OA.
+      rv = clearDataService->DeleteDataFromBaseDomain(host, false,
+                                                      TRACKER_PURGE_FLAGS, cb);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        clearPromise->Reject(0, __func__);
+      }
     }
 
     aClearPromises.AppendElement(clearPromise);

@@ -27,6 +27,7 @@ import java.util.Locale;
 import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.GeckoSystemStateListener;
 import org.mozilla.gecko.util.GeckoBundle;
+import org.mozilla.gecko.util.LocaleUtils;
 
 @AnyThread
 public final class GeckoRuntimeSettings extends RuntimeSettings {
@@ -456,21 +457,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
     }
 
     /**
-     * Add a {@link RuntimeTelemetry.Delegate} instance to this GeckoRuntime. This delegate can be
-     * used by the app to receive streaming telemetry data from GeckoView.
-     *
-     * @param delegate the delegate that will handle telemetry
-     * @return The builder instance.
-     */
-    @Deprecated
-    @DeprecationSchedule(id = "geckoview-gvst", version = 127)
-    public @NonNull Builder telemetryDelegate(final @NonNull RuntimeTelemetry.Delegate delegate) {
-      getSettings().mTelemetryProxy = new RuntimeTelemetry.Proxy(delegate);
-      getSettings().mTelemetryEnabled.set(true);
-      return this;
-    }
-
-    /**
      * Set the {@link ExperimentDelegate} instance on this runtime, if any. This delegate is used to
      * send and receive experiment information from Nimbus.
      *
@@ -662,7 +648,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
   /* package */ int mScreenHeightOverride;
   /* package */ Class<? extends Service> mCrashHandler;
   /* package */ String[] mRequestedLocales;
-  /* package */ RuntimeTelemetry.Proxy mTelemetryProxy;
   /* package */ ExperimentDelegate mExperimentDelegate;
 
   /**
@@ -673,10 +658,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
   /* package */ void attachTo(final @NonNull GeckoRuntime runtime) {
     mRuntime = runtime;
     commit();
-
-    if (mTelemetryProxy != null) {
-      mTelemetryProxy.attach();
-    }
   }
 
   @Override // RuntimeSettings
@@ -718,7 +699,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
     mCrashHandler = settings.mCrashHandler;
     mRequestedLocales = settings.mRequestedLocales;
     mConfigFilePath = settings.mConfigFilePath;
-    mTelemetryProxy = settings.mTelemetryProxy;
     mExperimentDelegate = settings.mExperimentDelegate;
   }
 
@@ -1072,24 +1052,14 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
       final String[] locales = new String[localeList.size()];
       for (int i = 0; i < localeList.size(); i++) {
         // accept-language should be language or language-region format.
-        locales[i] = getLanguageTagForAcceptLanguage(localeList.get(i));
+        locales[i] = LocaleUtils.getLanguageTagForAcceptLanguage(localeList.get(i));
       }
       return locales;
     }
     final String[] locales = new String[1];
     final Locale locale = Locale.getDefault();
-    locales[0] = getLanguageTagForAcceptLanguage(locale);
+    locales[0] = LocaleUtils.getLanguageTagForAcceptLanguage(locale);
     return locales;
-  }
-
-  private static String getLanguageTagForAcceptLanguage(final Locale locale) {
-    final StringBuilder out = new StringBuilder(locale.getLanguage());
-    final String country = locale.getCountry();
-    if (!TextUtils.isEmpty(country)) {
-      out.append('-').append(country);
-    }
-    // e.g. "en", "en-US"
-    return out.toString();
   }
 
   /**
@@ -1375,11 +1345,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
   public @NonNull GeckoRuntimeSettings setGlMsaaLevel(final int level) {
     mGlMsaaLevel.commit(level);
     return this;
-  }
-
-  @SuppressWarnings("checkstyle:javadocmethod")
-  public @Nullable RuntimeTelemetry.Delegate getTelemetryDelegate() {
-    return mTelemetryProxy.getDelegate();
   }
 
   /**

@@ -48,6 +48,7 @@ const ZERO_PREFIX_SCALAR_EXPOSURE = "urlbar.zeroprefix.exposure";
 const RESULT_MENU_COMMANDS = {
   DISMISS: "dismiss",
   HELP: "help",
+  MANAGE: "manage",
 };
 
 const getBoundsWithoutFlushing = element =>
@@ -1181,6 +1182,10 @@ export class UrlbarView {
     // future we should make it support any type of result. Or, even better,
     // results should be grouped, thus we can directly update groups.
 
+    // Discard tentative exposures. This is analogous to marking the
+    // hypothetical hidden rows of hidden-exposure results as stale.
+    this.controller.engagementEvent.discardTentativeExposures();
+
     // Walk rows and find an insertion index for results. To avoid flicker, we
     // skip rows until we find one compatible with the result we want to apply.
     // If we couldn't find a compatible range, we'll just update.
@@ -1217,7 +1222,7 @@ export class UrlbarView {
         ) {
           // We can replace the row's current result with the new one.
           if (result.exposureResultHidden) {
-            this.#addExposure(result);
+            this.controller.engagementEvent.addExposure(result);
           } else {
             this.#updateRow(row, result);
           }
@@ -1287,7 +1292,13 @@ export class UrlbarView {
         newSpanCount <= this.#queryContext.maxResults && !seenMisplacedResult;
       if (result.exposureResultHidden) {
         if (canBeVisible) {
-          this.#addExposure(result);
+          this.controller.engagementEvent.addExposure(result);
+        } else {
+          // Add a tentative exposure: The hypothetical row for this
+          // hidden-exposure result can't be visible now, but as long as it were
+          // not marked stale in a later update, it would be shown when stale
+          // rows are removed.
+          this.controller.engagementEvent.addTentativeExposure(result);
         }
         continue;
       }
@@ -1624,6 +1635,38 @@ export class UrlbarView {
     item.appendChild(button);
   }
 
+  #createSecondaryAction(action, global = false) {
+    let actionContainer = this.#createElement("div");
+    actionContainer.classList.add("urlbarView-actions-container");
+
+    let button = this.#createElement("span");
+    button.classList.add("urlbarView-action-btn");
+    if (global) {
+      button.classList.add("urlbarView-global-action-btn");
+    }
+    button.setAttribute("role", "button");
+    if (action.icon) {
+      let icon = this.#createElement("img");
+      icon.src = action.icon;
+      button.appendChild(icon);
+    }
+    for (let key in action.dataset ?? {}) {
+      button.dataset[key] = action.dataset[key];
+    }
+    button.dataset.action = action.key;
+    button.dataset.providerName = action.providerName;
+
+    let label = this.#createElement("span");
+    if (action.l10nId) {
+      this.#setElementL10n(label, { id: action.l10nId, args: action.l10nArgs });
+    } else {
+      this.document.l10n.setAttributes(label, action.label, action.l10nArgs);
+    }
+    button.appendChild(label);
+    actionContainer.appendChild(button);
+    return actionContainer;
+  }
+
   // eslint-disable-next-line complexity
   #updateRow(item, result) {
     let oldResult = item.result;
@@ -1695,6 +1738,26 @@ export class UrlbarView {
       this.#addRowButtons(item, result);
     }
     item._content.id = item.id + "-inner";
+
+    let isFirstChild = item === this.#rows.children[0];
+    let secAction =
+      result.heuristic || isFirstChild
+        ? lazy.UrlbarProvidersManager.getGlobalAction()
+        : result.payload.action;
+    let container = item.querySelector(".urlbarView-actions-container");
+    if (secAction && !container) {
+      item.appendChild(this.#createSecondaryAction(secAction, isFirstChild));
+    } else if (
+      secAction &&
+      secAction.key != container.firstChild.dataset.action
+    ) {
+      item.replaceChild(
+        this.#createSecondaryAction(secAction, isFirstChild),
+        container
+      );
+    } else if (!secAction && container) {
+      item.removeChild(container);
+    }
 
     item.removeAttribute("feedback-acknowledgment");
 
@@ -1789,6 +1852,10 @@ export class UrlbarView {
     let isRowSelectable = true;
     switch (result.type) {
       case lazy.UrlbarUtils.RESULT_TYPE.TAB_SWITCH:
+        // Hide chichlet when showing secondaryActions.
+        if (lazy.UrlbarPrefs.get("secondaryActions.featureGate")) {
+          break;
+        }
         actionSetter = () => {
           this.#setSwitchTabActionChiclet(result, action);
         };
@@ -2126,7 +2193,7 @@ export class UrlbarView {
       let visible = this.#isElementVisible(item);
       if (visible) {
         if (item.result.exposureResultType) {
-          this.#addExposure(item.result);
+          this.controller.engagementEvent.addExposure(item.result);
         }
         this.visibleResults.push(item.result);
       }
@@ -2363,6 +2430,10 @@ export class UrlbarView {
       row = next;
     }
     this.#updateIndices();
+
+    // Accept tentative exposures. This is analogous to unhiding the
+    // hypothetical non-stale hidden rows of hidden-exposure results.
+    this.controller.engagementEvent.acceptTentativeExposures();
   }
 
   #startRemoveStaleRowsTimer() {
@@ -3125,6 +3196,15 @@ export class UrlbarView {
         },
       });
     }
+    if (result.payload.isManageable) {
+      commands.push({
+        name: RESULT_MENU_COMMANDS.MANAGE,
+        l10n: {
+          id: "urlbar-result-menu-manage-firefox-suggest",
+        },
+      });
+    }
+
     let rv = commands.length ? commands : null;
     this.#resultMenuCommands.set(result, rv);
     return rv;
@@ -3459,15 +3539,6 @@ export class UrlbarView {
     if (event.target == this.resultMenu) {
       this.#populateResultMenu();
     }
-  }
-
-  /**
-   * Add result to exposure set on the controller.
-   *
-   * @param {UrlbarResult} result UrlbarResult for which to record an exposure.
-   */
-  #addExposure(result) {
-    this.controller.engagementEvent.addExposure(result);
   }
 }
 

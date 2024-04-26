@@ -1055,6 +1055,15 @@ void CacheIRStubInfo::replaceStubRawWord(uint8_t* stubData, uint32_t offset,
   *addr = newWord;
 }
 
+void CacheIRStubInfo::replaceStubRawValueBits(uint8_t* stubData,
+                                              uint32_t offset, uint64_t oldBits,
+                                              uint64_t newBits) const {
+  MOZ_ASSERT(uint64_t(stubData + offset) % sizeof(uint64_t) == 0);
+  uint64_t* addr = reinterpret_cast<uint64_t*>(stubData + offset);
+  MOZ_ASSERT(*addr == oldBits);
+  *addr = newBits;
+}
+
 template <class Stub, StubField::Type type>
 typename MapStubFieldToType<type>::WrappedType& CacheIRStubInfo::getStubField(
     Stub* stub, uint32_t offset) const {
@@ -1364,6 +1373,8 @@ bool jit::TraceWeakCacheIRStub(JSTracer* trc, T* stub,
                                const CacheIRStubInfo* stubInfo) {
   using Type = StubField::Type;
 
+  bool isDead = false;
+
   uint32_t field = 0;
   size_t offset = 0;
   while (true) {
@@ -1374,7 +1385,7 @@ bool jit::TraceWeakCacheIRStub(JSTracer* trc, T* stub,
             stubInfo->getStubField<T, Type::WeakShape>(stub, offset);
         auto r = TraceWeakEdge(trc, &shapeField, "cacheir-weak-shape");
         if (r.isDead()) {
-          return false;
+          isDead = true;
         }
         break;
       }
@@ -1383,7 +1394,7 @@ bool jit::TraceWeakCacheIRStub(JSTracer* trc, T* stub,
             stubInfo->getStubField<T, Type::WeakObject>(stub, offset);
         auto r = TraceWeakEdge(trc, &objectField, "cacheir-weak-object");
         if (r.isDead()) {
-          return false;
+          isDead = true;
         }
         break;
       }
@@ -1392,7 +1403,7 @@ bool jit::TraceWeakCacheIRStub(JSTracer* trc, T* stub,
             stubInfo->getStubField<T, Type::WeakBaseScript>(stub, offset);
         auto r = TraceWeakEdge(trc, &scriptField, "cacheir-weak-script");
         if (r.isDead()) {
-          return false;
+          isDead = true;
         }
         break;
       }
@@ -1402,12 +1413,13 @@ bool jit::TraceWeakCacheIRStub(JSTracer* trc, T* stub,
         auto r = TraceWeakEdge(trc, &getterSetterField,
                                "cacheir-weak-getter-setter");
         if (r.isDead()) {
-          return false;
+          isDead = true;
         }
         break;
       }
       case Type::Limit:
-        return true;  // Done.
+        // Done.
+        return !isDead;
       case Type::RawInt32:
       case Type::RawPointer:
       case Type::Shape:
@@ -2376,19 +2388,23 @@ bool CacheIRCompiler::emitGuardDynamicSlotValue(ObjOperandId objId,
   return true;
 }
 
-bool CacheIRCompiler::emitLoadScriptedProxyHandler(ValOperandId resultId,
+bool CacheIRCompiler::emitLoadScriptedProxyHandler(ObjOperandId resultId,
                                                    ObjOperandId objId) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
 
   Register obj = allocator.useRegister(masm, objId);
-  ValueOperand output = allocator.defineValueRegister(masm, resultId);
+  Register output = allocator.defineRegister(masm, resultId);
 
-  masm.loadPtr(Address(obj, ProxyObject::offsetOfReservedSlots()),
-               output.scratchReg());
-  masm.loadValue(
-      Address(output.scratchReg(), js::detail::ProxyReservedSlots::offsetOfSlot(
-                                       ScriptedProxyHandler::HANDLER_EXTRA)),
-      output);
+  FailurePath* failure;
+  if (!addFailurePath(&failure)) {
+    return false;
+  }
+
+  masm.loadPtr(Address(obj, ProxyObject::offsetOfReservedSlots()), output);
+  Address handlerAddr(output, js::detail::ProxyReservedSlots::offsetOfSlot(
+                                  ScriptedProxyHandler::HANDLER_EXTRA));
+  masm.fallibleUnboxObject(handlerAddr, output, failure->label());
+
   return true;
 }
 
@@ -2831,7 +2847,7 @@ bool CacheIRCompiler::emitStringToAtom(StringOperandId stringId) {
   masm.branchTest32(Assembler::NonZero, Address(str, JSString::offsetOfFlags()),
                     Imm32(JSString::ATOM_BIT), &done);
 
-  masm.lookupStringInAtomCacheLastLookups(str, scratch, &vmCall);
+  masm.tryFastAtomize(str, scratch, str, &vmCall);
   masm.jump(&done);
 
   masm.bind(&vmCall);
@@ -2934,14 +2950,27 @@ bool CacheIRCompiler::emitLoadEnclosingEnvironment(ObjOperandId objId,
 }
 
 bool CacheIRCompiler::emitLoadWrapperTarget(ObjOperandId objId,
-                                            ObjOperandId resultId) {
+                                            ObjOperandId resultId,
+                                            bool fallible) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
   Register obj = allocator.useRegister(masm, objId);
   Register reg = allocator.defineRegister(masm, resultId);
 
+  FailurePath* failure;
+  if (fallible && !addFailurePath(&failure)) {
+    return false;
+  }
+
   masm.loadPtr(Address(obj, ProxyObject::offsetOfReservedSlots()), reg);
-  masm.unboxObject(
-      Address(reg, js::detail::ProxyReservedSlots::offsetOfPrivateSlot()), reg);
+
+  Address targetAddr(reg,
+                     js::detail::ProxyReservedSlots::offsetOfPrivateSlot());
+  if (fallible) {
+    masm.fallibleUnboxObject(targetAddr, reg, failure->label());
+  } else {
+    masm.unboxObject(targetAddr, reg);
+  }
+
   return true;
 }
 
@@ -4650,8 +4679,7 @@ bool CacheIRCompiler::emitGuardNoAllocationMetadataBuilder(
   return true;
 }
 
-bool CacheIRCompiler::emitGuardFunctionHasJitEntry(ObjOperandId funId,
-                                                   bool constructing) {
+bool CacheIRCompiler::emitGuardFunctionHasJitEntry(ObjOperandId funId) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
   Register fun = allocator.useRegister(masm, funId);
 
@@ -4660,7 +4688,7 @@ bool CacheIRCompiler::emitGuardFunctionHasJitEntry(ObjOperandId funId,
     return false;
   }
 
-  masm.branchIfFunctionHasNoJitEntry(fun, constructing, failure->label());
+  masm.branchIfFunctionHasNoJitEntry(fun, failure->label());
   return true;
 }
 
@@ -4674,8 +4702,7 @@ bool CacheIRCompiler::emitGuardFunctionHasNoJitEntry(ObjOperandId funId) {
     return false;
   }
 
-  masm.branchIfFunctionHasJitEntry(obj, /*isConstructing =*/false,
-                                   failure->label());
+  masm.branchIfFunctionHasJitEntry(obj, failure->label());
   return true;
 }
 

@@ -1,6 +1,10 @@
-/////////////////////////////
-/// Window APIs
-/////////////////////////////
+/**
+ * NOTE: This file is a work in progress.
+ * Content was generated using a heavily patched TypeScript-DOM-lib-generator.
+ *
+ * Until this whole process is automated, when changing a WebIDL interface,
+ * manually updating this file is *not* required (but doesn't hurt either).
+ */
 
 /// <reference no-default-lib="true" />
 /// <reference types="gecko" />
@@ -9487,6 +9491,10 @@ interface Document extends Node, DocumentOrShadowRoot, FontFaceSource, GeometryU
      *
      * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Document/createElement)
      */
+    createElement<K extends keyof HTMLElementTagNameMap>(tagName: K, options?: ElementCreationOptions): HTMLElementTagNameMap[K];
+    /** @deprecated */
+    createElement<K extends keyof HTMLElementDeprecatedTagNameMap>(tagName: K, options?: ElementCreationOptions): HTMLElementDeprecatedTagNameMap[K];
+    createElement(tagName: string, options?: ElementCreationOptions): HTMLElement;
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/Document/createElementNS) */
     createElementNS(namespace: string | null, qualifiedName: string, options?: ElementCreationOptions | string): Element;
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/Document/createEvent) */
@@ -17894,11 +17902,10 @@ interface IDBFactory {
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/IDBFactory/cmp) */
     cmp(first: any, second: any): number;
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/IDBFactory/deleteDatabase) */
-    deleteDatabase(name: string, options?: IDBOpenDBOptions): IDBOpenDBRequest;
+    deleteDatabase(name: string): IDBOpenDBRequest;
     deleteForPrincipal(principal: Principal, name: string, options?: IDBOpenDBOptions): IDBOpenDBRequest;
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/IDBFactory/open) */
-    open(name: string, version: number): IDBOpenDBRequest;
-    open(name: string, options?: IDBOpenDBOptions): IDBOpenDBRequest;
+    open(name: string, version?: number): IDBOpenDBRequest;
     openForPrincipal(principal: Principal, name: string, version: number): IDBOpenDBRequest;
     openForPrincipal(principal: Principal, name: string, options?: IDBOpenDBOptions): IDBOpenDBRequest;
 }

@@ -970,7 +970,7 @@ var BrowserPageActions = {
     this._contextAction = null;
 
     let viewID = "addons://detail/" + encodeURIComponent(action.extensionID);
-    window.BrowserOpenAddonsMgr(viewID);
+    window.BrowserAddonUI.openAddonsMgr(viewID);
   },
 
   /**
@@ -1008,7 +1008,7 @@ BrowserPageActions.bookmark = {
     }
   },
 
-  onCommand(event, buttonNode) {
+  onCommand(event) {
     PanelMultiView.hidePopup(BrowserPageActions.panelNode);
     BookmarkingUI.onStarCommand(event);
   },

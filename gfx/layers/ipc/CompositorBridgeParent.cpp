@@ -167,6 +167,7 @@ bool CompositorBridgeParentBase::DeallocShmem(ipc::Shmem& aShmem) {
 
 CompositorBridgeParent::LayerTreeState::LayerTreeState()
     : mApzcTreeManagerParent(nullptr),
+      mApzInputBridgeParent(nullptr),
       mParent(nullptr),
       mContentCompositorBridgeParent(nullptr) {}
 
@@ -645,9 +646,21 @@ bool CompositorBridgeParent::DeallocPAPZCTreeManagerParent(
   return true;
 }
 
+void CompositorBridgeParent::SetAPZInputBridgeParent(
+    const LayersId& aLayersId, APZInputBridgeParent* aInputBridgeParent) {
+  MOZ_RELEASE_ASSERT(XRE_IsGPUProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+  StaticMonitorAutoLock lock(CompositorBridgeParent::sIndirectLayerTreesLock);
+  CompositorBridgeParent::LayerTreeState& state =
+      CompositorBridgeParent::sIndirectLayerTrees[aLayersId];
+  MOZ_ASSERT(!state.mApzInputBridgeParent);
+  state.mApzInputBridgeParent = aInputBridgeParent;
+}
+
 void CompositorBridgeParent::AllocateAPZCTreeManagerParent(
     const StaticMonitorAutoLock& aProofOfLayerTreeStateLock,
     const LayersId& aLayersId, LayerTreeState& aState) {
+  MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
   MOZ_ASSERT(aState.mParent == this);
   MOZ_ASSERT(mApzcTreeManager);
   MOZ_ASSERT(mApzUpdater);
@@ -1713,6 +1726,15 @@ APZCTreeManagerParent* CompositorBridgeParent::GetApzcTreeManagerParentForRoot(
 }
 
 /* static */
+APZInputBridgeParent* CompositorBridgeParent::GetApzInputBridgeParentForRoot(
+    LayersId aContentLayersId) {
+  StaticMonitorAutoLock lock(sIndirectLayerTreesLock);
+  CompositorBridgeParent::LayerTreeState* state =
+      GetStateForRoot(aContentLayersId, lock);
+  return state ? state->mApzInputBridgeParent : nullptr;
+}
+
+/* static */
 GeckoContentController*
 CompositorBridgeParent::GetGeckoContentControllerForRoot(
     LayersId aContentLayersId) {
@@ -1777,20 +1799,20 @@ int32_t RecordContentFrameTime(
                         ContentFrameMarker{});
   }
 
-  mozilla::glean::gfx_content_frame_time::from_paint.AccumulateSamples(
-      {static_cast<unsigned long long>(fracLatencyNorm)});
+  mozilla::glean::gfx_content_frame_time::from_paint.AccumulateSingleSample(
+      static_cast<unsigned long long>(fracLatencyNorm));
 
   if (!(aTxnId == VsyncId()) && aVsyncStart) {
     latencyMs = (aCompositeEnd - aVsyncStart).ToMilliseconds();
     latencyNorm = latencyMs / aVsyncRate.ToMilliseconds();
     fracLatencyNorm = lround(latencyNorm * 100.0);
     int32_t result = fracLatencyNorm;
-    mozilla::glean::gfx_content_frame_time::from_vsync.AccumulateSamples(
-        {static_cast<unsigned long long>(fracLatencyNorm)});
+    mozilla::glean::gfx_content_frame_time::from_vsync.AccumulateSingleSample(
+        static_cast<unsigned long long>(fracLatencyNorm));
 
     if (aContainsSVGGroup) {
-      mozilla::glean::gfx_content_frame_time::with_svg.AccumulateSamples(
-          {static_cast<unsigned long long>(fracLatencyNorm)});
+      mozilla::glean::gfx_content_frame_time::with_svg.AccumulateSingleSample(
+          static_cast<unsigned long long>(fracLatencyNorm));
     }
 
     // Record CONTENT_FRAME_TIME_REASON.
@@ -1889,8 +1911,8 @@ int32_t RecordContentFrameTime(
         fracLatencyNorm = lround(latencyNorm * 100.0);
       }
       mozilla::glean::gfx_content_frame_time::without_resource_upload
-          .AccumulateSamples(
-              {static_cast<unsigned long long>(fracLatencyNorm)});
+          .AccumulateSingleSample(
+              static_cast<unsigned long long>(fracLatencyNorm));
 
       if (aStats) {
         latencyMs -= (double(aStats->gpu_cache_upload_time) / 1000000.0);
@@ -1898,8 +1920,8 @@ int32_t RecordContentFrameTime(
         fracLatencyNorm = lround(latencyNorm * 100.0);
       }
       mozilla::glean::gfx_content_frame_time::without_resource_upload
-          .AccumulateSamples(
-              {static_cast<unsigned long long>(fracLatencyNorm)});
+          .AccumulateSingleSample(
+              static_cast<unsigned long long>(fracLatencyNorm));
     }
     return result;
   }

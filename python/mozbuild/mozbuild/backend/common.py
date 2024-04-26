@@ -13,6 +13,7 @@ import six
 from mozpack.chrome.manifest import parse_manifest_line
 
 from mozbuild.backend.base import BuildBackend
+from mozbuild.dirutils import mkdir
 from mozbuild.frontend.context import (
     VARIABLES,
     Context,
@@ -44,7 +45,6 @@ from mozbuild.frontend.data import (
 )
 from mozbuild.jar import DeprecatedJarManifest, JarManifestParser
 from mozbuild.preprocessor import Preprocessor
-from mozbuild.util import mkdir
 
 
 class XPIDLManager(object):
@@ -182,7 +182,7 @@ class CommonBackend(BuildBackend):
                     # the order is not consistent across multiple runs.
                     #
                     # Exclude this file in order to avoid breaking the
-                    # taskcluster/ci/diffoscope/reproducible.yml jobs.
+                    # taskcluster/kinds/diffoscope/reproducible.yml jobs.
                     continue
                 fullpath = ObjDirPath(obj._context, "!" + f).full_path
                 self._handle_generated_sources([fullpath])

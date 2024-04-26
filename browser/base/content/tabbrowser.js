@@ -67,7 +67,7 @@
     replaceContainerClass("color", hbox, identity.color);
 
     let label = ContextualIdentityService.getUserContextLabel(userContextId);
-    document.getElementById("userContext-label").setAttribute("value", label);
+    document.getElementById("userContext-label").textContent = label;
     // Also set the container label as the tooltip so we can only show the icon
     // in small windows.
     hbox.setAttribute("tooltiptext", label);
@@ -161,6 +161,7 @@
       TO_START: 2,
       TO_END: 3,
       MULTI_SELECTED: 4,
+      DUPLICATES: 6,
     },
 
     _lastRelatedTabMap: new WeakMap(),
@@ -346,6 +347,59 @@
 
     get visibleTabs() {
       return this.tabContainer._getVisibleTabs();
+    },
+
+    getDuplicateTabsToClose(aTab) {
+      // One would think that a set is better, but it would need to copy all
+      // the strings instead of just keeping references to the nsIURI objects,
+      // and the array is presumed to be small anyways.
+      let keys = [];
+      let keyForTab = tab => {
+        let uri = tab.linkedBrowser?.currentURI;
+        if (!uri) {
+          return null;
+        }
+        return {
+          uri,
+          userContextId: tab.userContextId,
+        };
+      };
+      let keyEquals = (a, b) => {
+        return a.userContextId == b.userContextId && a.uri.equals(b.uri);
+      };
+      if (aTab.multiselected) {
+        for (let tab of this.selectedTabs) {
+          let key = keyForTab(tab);
+          if (key) {
+            keys.push(key);
+          }
+        }
+      } else {
+        let key = keyForTab(aTab);
+        if (key) {
+          keys.push(key);
+        }
+      }
+
+      if (!keys.length) {
+        return [];
+      }
+
+      let duplicateTabs = [];
+      for (let tab of this.tabs) {
+        if (tab == aTab || tab.pinned) {
+          continue;
+        }
+        if (aTab.multiselected && tab.multiselected) {
+          continue;
+        }
+        let key = keyForTab(tab);
+        if (key && keys.some(k => keyEquals(k, key))) {
+          duplicateTabs.push(tab);
+        }
+      }
+
+      return duplicateTabs;
     },
 
     get _numPinnedTabs() {
@@ -893,14 +947,6 @@
         : "";
     },
 
-    getTabModalPromptBox(aBrowser) {
-      let browser = aBrowser || this.selectedBrowser;
-      if (!browser.tabModalPromptBox) {
-        browser.tabModalPromptBox = new TabModalPromptBox(browser);
-      }
-      return browser.tabModalPromptBox;
-    },
-
     getTabDialogBox(aBrowser) {
       if (!aBrowser) {
         throw new Error("aBrowser is required");
@@ -1116,6 +1162,11 @@
         return;
       }
 
+      let oldBrowser = this.selectedBrowser;
+      // Once the async switcher starts, it's unpredictable when it will touch
+      // the address bar, thus we store its state immediately.
+      gURLBar?.saveSelectionStateForBrowser(oldBrowser);
+
       let newTab = this.getTabForBrowser(newBrowser);
 
       if (!aForceUpdate) {
@@ -1145,18 +1196,11 @@
       }
       this._lastRelatedTabMap = new WeakMap();
 
-      let oldBrowser = this.selectedBrowser;
-
       if (!gMultiProcessBrowser) {
         oldBrowser.removeAttribute("primary");
         oldBrowser.docShellIsActive = false;
         newBrowser.setAttribute("primary", "true");
         newBrowser.docShellIsActive = !document.hidden;
-      }
-
-      if (gURLBar) {
-        oldBrowser._urlbarSelectionStart = gURLBar.selectionStart;
-        oldBrowser._urlbarSelectionEnd = gURLBar.selectionEnd;
       }
 
       this._selectedBrowser = newBrowser;
@@ -1320,31 +1364,6 @@
           this.addToMultiSelectedTabs(oldTab);
         }
 
-        if (oldBrowser != newBrowser && oldBrowser.getInPermitUnload) {
-          oldBrowser.getInPermitUnload(inPermitUnload => {
-            if (!inPermitUnload) {
-              return;
-            }
-            // Since the user is switching away from a tab that has
-            // a beforeunload prompt active, we remove the prompt.
-            // This prevents confusing user flows like the following:
-            //   1. User attempts to close Firefox
-            //   2. User switches tabs (ingoring a beforeunload prompt)
-            //   3. User returns to tab, presses "Leave page"
-            let promptBox = this.getTabModalPromptBox(oldBrowser);
-            let prompts = promptBox.listPrompts();
-            // There might not be any prompts here if the tab was closed
-            // while in an onbeforeunload prompt, which will have
-            // destroyed aforementioned prompt already, so check there's
-            // something to remove, first:
-            if (prompts.length) {
-              // NB: This code assumes that the beforeunload prompt
-              //     is the top-most prompt on the tab.
-              prompts[prompts.length - 1].abortPrompt();
-            }
-          });
-        }
-
         if (!gMultiProcessBrowser) {
           this._adjustFocusBeforeTabSwitch(oldTab, newTab);
           this._adjustFocusAfterTabSwitch(newTab);
@@ -1439,19 +1458,6 @@
         newBrowser.tabDialogBox.focus();
         return;
       }
-      if (newBrowser.hasAttribute("tabmodalPromptShowing")) {
-        // If there's a tabmodal prompt showing, focus it.
-        let prompts = newBrowser.tabModalPromptBox.listPrompts();
-        let prompt = prompts[prompts.length - 1];
-        // @tabmodalPromptShowing is also set for other tab modal prompts
-        // (e.g. the Payment Request dialog) so there may not be a <tabmodalprompt>.
-        // Bug 1492814 will implement this for the Payment Request dialog.
-        if (prompt) {
-          prompt.Dialog.setDefaultFocus();
-          return;
-        }
-      }
-
       // Focus the location bar if it was previously focused for that tab.
       // In full screen mode, only bother making the location bar visible
       // if the tab is a blank one.
@@ -1491,19 +1497,12 @@
                 if (currentActiveElement != document.activeElement) {
                   return;
                 }
-
-                gURLBar.setSelectionRange(
-                  newBrowser._urlbarSelectionStart,
-                  newBrowser._urlbarSelectionEnd
-                );
+                gURLBar.restoreSelectionStateForBrowser(newBrowser);
               },
               { once: true }
             );
           } else {
-            gURLBar.setSelectionRange(
-              newBrowser._urlbarSelectionStart,
-              newBrowser._urlbarSelectionEnd
-            );
+            gURLBar.restoreSelectionStateForBrowser(newBrowser);
           }
         };
 
@@ -1656,6 +1655,22 @@
 
     _dataURLRegEx: /^data:[^,]+;base64,/i,
 
+    // Regex to test if a string (potential tab label) consists of only non-
+    // printable characters. We consider Unicode categories Separator
+    // (spaces & line-breaks) and Other (control chars, private use, non-
+    // character codepoints) to be unprintable, along with a few specific
+    // characters whose expected rendering is blank:
+    //   U+2800 BRAILLE PATTERN BLANK (category So)
+    //   U+115F HANGUL CHOSEONG FILLER (category Lo)
+    //   U+1160 HANGUL JUNGSEONG FILLER (category Lo)
+    //   U+3164 HANGUL FILLER (category Lo)
+    //   U+FFA0 HALFWIDTH HANGUL FILLER (category Lo)
+    // We also ignore combining marks, as in the absence of a printable base
+    // character they are unlikely to be usefully rendered, and may well be
+    // clipped away entirely.
+    _nonPrintingRegEx:
+      /^[\p{Z}\p{C}\p{M}\u{115f}\u{1160}\u{2800}\u{3164}\u{ffa0}]*$/u,
+
     setTabTitle(aTab) {
       var browser = this.getBrowserForTab(aTab);
       var title = browser.contentTitle;
@@ -1676,6 +1691,16 @@
       }
 
       let isURL = false;
+
+      // Trim leading and trailing whitespace from the title.
+      title = title.trim();
+
+      // If the title contains only non-printing characters (or only combining
+      // marks, but no base character for them), we won't use it.
+      if (this._nonPrintingRegEx.test(title)) {
+        title = "";
+      }
+
       let isContentTitle = !!title;
       if (!title) {
         // See if we can use the URI as the title.
@@ -2096,18 +2121,6 @@
       // permanentKey is held by something after this window closes, it
       // doesn't keep the window alive.
       b.permanentKey = new (Cu.getGlobalForObject(Services).Object)();
-
-      // Ensure that SessionStore has flushed any session history state from the
-      // content process before we this browser's remoteness.
-      if (!Services.appinfo.sessionHistoryInParent) {
-        b.prepareToChangeRemoteness = () =>
-          SessionStore.prepareToChangeRemoteness(b);
-        b.afterChangeRemoteness = switchId => {
-          let tab = this.getTabForBrowser(b);
-          SessionStore.finishTabRemotenessChange(tab, switchId);
-          return true;
-        };
-      }
 
       const defaultBrowserAttributes = {
         contextmenu: "contentAreaContextMenu",
@@ -2682,8 +2695,6 @@
           animate,
           userContextId,
           openerTab,
-          createLazyBrowser,
-          skipAnimation,
           pinned,
           noInitialLabel,
           skipBackgroundNotify,
@@ -2849,8 +2860,6 @@
       uriString,
       userContextId,
       openerTab,
-      createLazyBrowser,
-      skipAnimation,
       pinned,
       noInitialLabel,
       skipBackgroundNotify,
@@ -3367,7 +3376,7 @@
       Services.telemetry.setEventRecordingEnabled("close_tab_warning", true);
       let closeTabEnumKey =
         Object.entries(this.closingTabsEnum)
-          .find(([k, v]) => v == aCloseTabs)?.[0]
+          .find(([, v]) => v == aCloseTabs)?.[0]
           ?.toLowerCase() || "some";
 
       let warnCheckbox = warnOnClose.value ? "checked" : "unchecked";
@@ -3545,6 +3554,28 @@
       return tabsToEnd;
     },
 
+    removeDuplicateTabs(aTab) {
+      let tabs = this.getDuplicateTabsToClose(aTab);
+      if (!tabs.length) {
+        return;
+      }
+
+      if (
+        !this.warnAboutClosingTabs(tabs.length, this.closingTabsEnum.DUPLICATES)
+      ) {
+        return;
+      }
+
+      this.removeTabs(tabs);
+      if (tabs.length) {
+        ConfirmationHint.show(aTab, "confirmation-hint-duplicate-tabs-closed", {
+          l10nArgs: {
+            tabCount: tabs.length,
+          },
+        });
+      }
+    },
+
     /**
      * In a multi-select context, the tabs (except pinned tabs) that are located to the
      * left of the leftmost selected tab will be removed.
@@ -3674,6 +3705,8 @@
       tabs,
       {
         animate,
+        // See bug 1883051
+        // eslint-disable-next-line no-unused-vars
         suppressWarnAboutClosingWindow,
         skipPermitUnload,
         skipRemoves,
@@ -4390,6 +4423,56 @@
         );
       }
     },
+    /**
+     * Closes tabs within the browser that match a given list of nsURIs. Returns
+     * any nsURIs that could not be closed successfully. This does not close any
+     * tabs that have a beforeUnload prompt
+     *
+     * @param {nsURI[]} urisToClose
+     *   The set of uris to remove.
+     * @returns {nsURI[]}
+     *  the nsURIs that weren't found in this browser
+     */
+    async closeTabsByURI(urisToClose) {
+      let remainingURIsToClose = [...urisToClose];
+      let tabsToRemove = [];
+      for (let tab of this.tabs) {
+        let currentURI = tab.linkedBrowser.currentURI;
+        // Find any URI that matches the current tab's URI
+        const matchedIndex = remainingURIsToClose.findIndex(uriToClose =>
+          uriToClose.equals(currentURI)
+        );
+
+        if (matchedIndex > -1) {
+          tabsToRemove.push(tab);
+          remainingURIsToClose.splice(matchedIndex, 1); // Remove the matched URI
+        }
+      }
+
+      if (tabsToRemove.length) {
+        const { beforeUnloadComplete, lastToClose } = this._startRemoveTabs(
+          tabsToRemove,
+          {
+            animate: false,
+            suppressWarnAboutClosingWindow: true,
+            skipPermitUnload: false,
+            skipRemoves: false,
+            skipSessionStore: false,
+          }
+        );
+
+        // Wait for the beforeUnload handlers to complete.
+        await beforeUnloadComplete;
+
+        // _startRemoveTabs doesn't close the last tab in the window
+        // for this use case, we simply close it
+        if (lastToClose) {
+          this.removeTab(lastToClose);
+        }
+      }
+      // If we still have uris, that means we couldn't find them in this window instance
+      return remainingURIsToClose;
+    },
 
     /**
      * Handles opening a new tab with mouse middleclick.
@@ -4406,7 +4489,7 @@
       } // Do nothing
 
       if (event.button == 1) {
-        BrowserOpenTab({ event });
+        BrowserCommands.openTab({ event });
         // Stop the propagation of the click event, to prevent the event from being
         // handled more than once.
         // E.g. see https://bugzilla.mozilla.org/show_bug.cgi?id=1657992#c4
@@ -5849,7 +5932,7 @@
       }
     },
 
-    observe(aSubject, aTopic, aData) {
+    observe(aSubject, aTopic) {
       switch (aTopic) {
         case "contextual-identity-updated": {
           let identity = aSubject.wrappedJSObject;
@@ -6105,12 +6188,7 @@
               );
               if (permission != Services.perms.ALLOW_ACTION) {
                 // Tell the prompt box we want to show the user a checkbox:
-                let tabPrompt = Services.prefs.getBoolPref(
-                  "prompts.contentPromptSubDialog"
-                )
-                  ? this.getTabDialogBox(tabForEvent.linkedBrowser)
-                  : this.getTabModalPromptBox(tabForEvent.linkedBrowser);
-
+                let tabPrompt = this.getTabDialogBox(tabForEvent.linkedBrowser);
                 tabPrompt.onNextPromptShowAllowFocusCheckboxFor(
                   promptPrincipal
                 );
@@ -6352,7 +6430,7 @@
         let oldUserTypedValue = browser.userTypedValue;
         let hadStartedLoad = browser.didStartLoadSinceLastUserTyping();
 
-        let didChange = didChangeEvent => {
+        let didChange = () => {
           browser.userTypedValue = oldUserTypedValue;
           if (hadStartedLoad) {
             browser.urlbarChangeTracker.startedLoad();
@@ -7461,7 +7539,7 @@ var TabBarVisibility = {
 
     toolbar.collapsed = collapse;
     let navbar = document.getElementById("nav-bar");
-    navbar.setAttribute("tabs-hidden", collapse);
+    navbar.toggleAttribute("tabs-hidden", collapse);
 
     document.getElementById("menu_closeWindow").hidden = collapse;
     document.l10n.setAttributes(
@@ -7593,9 +7671,8 @@ var TabContextMenu = {
       tabsToMove[0] == visibleTabs[gBrowser._numPinnedTabs];
     contextMoveTabToStart.disabled = isFirstTab && allSelectedTabsAdjacent;
 
-    if (this.contextTab.hasAttribute("customizemode")) {
-      document.getElementById("context_openTabInWindow").disabled = true;
-    }
+    document.getElementById("context_openTabInWindow").disabled =
+      this.contextTab.hasAttribute("customizemode");
 
     // Only one of "Duplicate Tab"/"Duplicate Tabs" should be visible.
     document.getElementById("context_duplicateTab").hidden =
@@ -7628,6 +7705,17 @@ var TabContextMenu = {
     document
       .getElementById("context_closeTab")
       .setAttribute("data-l10n-args", tabCountInfo);
+
+    let closeDuplicateEnabled = Services.prefs.getBoolPref(
+      "browser.tabs.context.close-duplicate.enabled"
+    );
+    let closeDuplicateTabsItem = document.getElementById(
+      "context_closeDuplicateTabs"
+    );
+    closeDuplicateTabsItem.hidden = !closeDuplicateEnabled;
+    closeDuplicateTabsItem.disabled =
+      !closeDuplicateEnabled ||
+      !gBrowser.getDuplicateTabsToClose(this.contextTab).length;
 
     // Disable "Close Multiple Tabs" if all sub menuitems are disabled
     document.getElementById("context_closeTabOptions").disabled =
@@ -7785,7 +7873,7 @@ var TabContextMenu = {
     }
   },
 
-  closeContextTabs(event) {
+  closeContextTabs() {
     if (this.contextTab.multiselected) {
       gBrowser.removeMultiSelectedTabs();
     } else {

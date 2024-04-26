@@ -3,10 +3,7 @@ import {
   AboutPreferences,
   PREFERENCES_LOADED_EVENT,
 } from "lib/AboutPreferences.sys.mjs";
-import {
-  actionTypes as at,
-  actionCreators as ac,
-} from "common/Actions.sys.mjs";
+import { actionTypes as at, actionCreators as ac } from "common/Actions.mjs";
 import { GlobalOverrider } from "test/unit/utils";
 
 describe("AboutPreferences Feed", () => {
@@ -57,17 +54,21 @@ describe("AboutPreferences Feed", () => {
       instance.onAction(action);
       assert.calledOnce(action._target.browser.ownerGlobal.openPreferences);
     });
-    it("should call .BrowserOpenAddonsMgr with the extension id on OPEN_WEBEXT_SETTINGS", () => {
+    it("should call .BrowserAddonUI.openAddonsMgr with the extension id on OPEN_WEBEXT_SETTINGS", () => {
       const action = {
         type: at.OPEN_WEBEXT_SETTINGS,
         data: "foo",
         _target: {
-          browser: { ownerGlobal: { BrowserOpenAddonsMgr: sinon.spy() } },
+          browser: {
+            ownerGlobal: {
+              BrowserAddonUI: { openAddonsMgr: sinon.spy() },
+            },
+          },
         },
       };
       instance.onAction(action);
       assert.calledWith(
-        action._target.browser.ownerGlobal.BrowserOpenAddonsMgr,
+        action._target.browser.ownerGlobal.BrowserAddonUI.openAddonsMgr,
         "addons://detail/foo"
       );
     });

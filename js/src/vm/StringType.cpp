@@ -359,7 +359,7 @@ const char* RepresentationToString(const JSString* s) {
 template <typename KnownF, typename UnknownF>
 void ForEachStringFlag(const JSString* str, uint32_t flags, KnownF known,
                        UnknownF unknown) {
-  for (uint32_t i = js::Bit(3); i < js::Bit(16); i = i << 1) {
+  for (uint32_t i = js::Bit(3); i < js::Bit(17); i = i << 1) {
     if (!(flags & i)) {
       continue;
     }
@@ -380,9 +380,13 @@ void ForEachStringFlag(const JSString* str, uint32_t flags, KnownF known,
         static_assert(JSString::LINEAR_IS_EXTENSIBLE_BIT ==
                       JSString::INLINE_IS_FAT_BIT);
         if (str->isLinear()) {
-          known("EXTENSIBLE");
-        } else if (str->isInline()) {
-          known("FAT");
+          if (str->isInline()) {
+            known("FAT");
+          } else if (!str->isAtom()) {
+            known("EXTENSIBLE");
+          } else {
+            unknown(i);
+          }
         } else {
           unknown(i);
         }
@@ -402,13 +406,14 @@ void ForEachStringFlag(const JSString* str, uint32_t flags, KnownF known,
         known("LATIN1_CHARS_BIT");
         break;
       case JSString::ATOM_IS_INDEX_BIT:
-        known("ATOM_IS_INDEX_BIT");
+        if (str->isAtom()) {
+          known("ATOM_IS_INDEX_BIT");
+        } else {
+          known("ATOM_REF_BIT");
+        }
         break;
       case JSString::INDEX_VALUE_BIT:
         known("INDEX_VALUE_BIT");
-        break;
-      case JSString::NON_DEDUP_BIT:
-        known("NON_DEDUP_BIT");
         break;
       case JSString::IN_STRING_TO_ATOM_CACHE:
         known("IN_STRING_TO_ATOM_CACHE");
@@ -417,7 +422,7 @@ void ForEachStringFlag(const JSString* str, uint32_t flags, KnownF known,
         if (str->isRope()) {
           known("FLATTEN_VISIT_RIGHT");
         } else {
-          unknown(i);
+          known("DEPENDED_ON_BIT");
         }
         break;
       case JSString::FLATTEN_FINISH_NODE:
@@ -428,7 +433,7 @@ void ForEachStringFlag(const JSString* str, uint32_t flags, KnownF known,
         } else if (str->isAtom()) {
           known("PINNED_ATOM_BIT");
         } else {
-          unknown(i);
+          known("NON_DEDUP_BIT");
         }
         break;
       default:
@@ -638,11 +643,20 @@ static MOZ_ALWAYS_INLINE JSString::OwnedChars<CharT> AllocChars(JSContext* cx,
     MOZ_ASSERT(cx->nursery().isEnabled());
     auto [buffer, isMalloced] = cx->nursery().allocateBuffer(
         cx->zone(), length * sizeof(CharT), js::StringBufferArena);
+    if (!buffer) {
+      ReportOutOfMemory(cx);
+      return {nullptr, 0, false, false};
+    }
 
     return {static_cast<CharT*>(buffer), length, isMalloced, isMalloced};
   }
 
   auto buffer = cx->make_pod_arena_array<CharT>(js::StringBufferArena, length);
+  if (!buffer) {
+    ReportOutOfMemory(cx);
+    return {nullptr, 0, false, false};
+  }
+
   return {std::move(buffer), length, true};
 }
 
@@ -914,10 +928,19 @@ JSLinearString* JSRope::flattenInternal(JSRope* root) {
    * JSDependentStrings pointing to them already. Stealing the buffer doesn't
    * change its address, only its owning JSExtensibleString, so all chars()
    * pointers in the JSDependentStrings are still valid.
+   *
+   * This chain of dependent strings could be problematic if the base string
+   * moves, either because it was initially allocated in the nursery or it
+   * gets deduplicated, because you might have a dependent ->
+   * tenured dependent -> nursery base string, and the store buffer would
+   * only capture the latter edge. Prevent this case from happening by
+   * marking the root as nondeduplicatable if the extensible string
+   * optimization applied.
    */
   const size_t wholeLength = root->length();
   size_t wholeCapacity;
   CharT* wholeChars;
+  bool setRootDependedOn = false;
 
   AutoCheckCannotGC nogc;
 
@@ -1023,6 +1046,7 @@ finish_node: {
                          StringFlagsForCharType<CharT>(INIT_DEPENDENT_FLAGS));
   str->d.s.u3.base =
       reinterpret_cast<JSLinearString*>(root); /* will be true on exit */
+  setRootDependedOn = true;
 
   // Every interior (rope) node in the rope's tree will be visited during
   // the traversal and post-barriered here, so earlier additions of
@@ -1065,12 +1089,28 @@ finish_root:
     if (left.inStringToAtomCache()) {
       flags |= IN_STRING_TO_ATOM_CACHE;
     }
+    // If left was depended on, we need to make sure we preserve that. Even
+    // though the string that depended on left's buffer will now depend on
+    // root's buffer, if left is the only edge to root, replacing left with an
+    // atom ref would break that edge and allow root's buffer to be freed.
+    if (left.isDependedOn()) {
+      flags |= DEPENDED_ON_BIT;
+    }
     left.setLengthAndFlags(left.length(), StringFlagsForCharType<CharT>(flags));
     left.d.s.u3.base = &root->asLinear();
     if (left.isTenured() && !root->isTenured()) {
-      // leftmost child -> root is a tenured -> nursery edge.
+      // leftmost child -> root is a tenured -> nursery edge. Put the leftmost
+      // child in the store buffer and prevent the root's chars from moving or
+      // being freed (because the leftmost child may have a tenured dependent
+      // string that cannot be updated.)
       root->storeBuffer()->putWholeCell(&left);
+      root->setNonDeduplicatable();
     }
+    setRootDependedOn = true;
+  }
+
+  if (setRootDependedOn) {
+    root->setDependedOn();
   }
 
   return &root->asLinear();
@@ -1455,15 +1495,17 @@ uint32_t JSAtom::getIndexSlow() const {
                           : AtomCharsToIndex(twoByteChars(nogc), len);
 }
 
-static void MarkStringAndBasesNonDeduplicatable(JSLinearString* s) {
-  while (true) {
-    if (!s->isTenured()) {
-      s->setNonDeduplicatable();
-    }
-    if (!s->hasBase()) {
-      break;
-    }
+// Prevent the actual owner of the string's characters from being deduplicated
+// (and thus freeing its characters, which would invalidate the ASSC's chars
+// pointer). Intermediate dependent strings on the chain can be deduplicated,
+// since the base will be updated to the root base during tenuring anyway and
+// the intermediates won't matter.
+void PreventRootBaseDeduplication(JSLinearString* s) {
+  while (s->hasBase()) {
     s = s->base();
+  }
+  if (!s->isTenured()) {
+    s->setNonDeduplicatable();
   }
 }
 
@@ -1492,7 +1534,7 @@ bool AutoStableStringChars::init(JSContext* cx, JSString* s) {
     twoByteChars_ = linearString->rawTwoByteChars();
   }
 
-  MarkStringAndBasesNonDeduplicatable(linearString);
+  PreventRootBaseDeduplication(linearString);
 
   s_ = linearString;
   return true;
@@ -1518,7 +1560,7 @@ bool AutoStableStringChars::initTwoByte(JSContext* cx, JSString* s) {
   state_ = TwoByte;
   twoByteChars_ = linearString->rawTwoByteChars();
 
-  MarkStringAndBasesNonDeduplicatable(linearString);
+  PreventRootBaseDeduplication(linearString);
 
   s_ = linearString;
   return true;
@@ -2474,6 +2516,45 @@ bool JSString::fillWithRepresentatives(JSContext* cx,
   MOZ_ASSERT(index == StringTypes * CharTypes * HeapType);
 #endif
 
+  return true;
+}
+
+bool JSString::tryReplaceWithAtomRef(JSAtom* atom) {
+  MOZ_ASSERT(!isAtomRef());
+
+  if (isDependedOn() || isInline() || isExternal()) {
+    return false;
+  }
+
+  AutoCheckCannotGC nogc;
+  if (hasOutOfLineChars()) {
+    void* buffer = asLinear().nonInlineCharsRaw();
+    // This is a little cheeky and so deserves a comment. If the string is
+    // not tenured, then either its buffer lives purely in the nursery, in
+    // which case it will just be forgotten and blown away in the next
+    // minor GC, or it is tracked in the nursery's mallocedBuffers hashtable,
+    // in which case it will be freed for us in the next minor GC. We opt
+    // to let the GC take care of it since there's a chance it will run
+    // during idle time.
+    if (isTenured()) {
+      RemoveCellMemory(this, allocSize(), MemoryUse::StringContents);
+      js_free(buffer);
+    }
+  }
+
+  uint32_t flags = INIT_ATOM_REF_FLAGS;
+  d.s.u3.atom = atom;
+  if (atom->hasLatin1Chars()) {
+    flags |= LATIN1_CHARS_BIT;
+    setLengthAndFlags(length(), flags);
+    setNonInlineChars(atom->chars<Latin1Char>(nogc));
+  } else {
+    setLengthAndFlags(length(), flags);
+    setNonInlineChars(atom->chars<char16_t>(nogc));
+  }
+  // Redundant, but just a reminder that this needs to be true or else we need
+  // to check and conditionally put ourselves in the store buffer
+  MOZ_ASSERT(atom->isTenured());
   return true;
 }
 

@@ -236,7 +236,7 @@ class ReleaseNotificationControlRunnable final
 
  public:
   explicit ReleaseNotificationControlRunnable(Notification* aNotification)
-      : MainThreadWorkerControlRunnable(aNotification->mWorkerPrivate),
+      : MainThreadWorkerControlRunnable("ReleaseNotificationControlRunnable"),
         mNotification(aNotification) {}
 
   bool WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override {
@@ -310,7 +310,7 @@ class NotificationWorkerRunnable : public MainThreadWorkerRunnable {
   explicit NotificationWorkerRunnable(
       WorkerPrivate* aWorkerPrivate,
       const char* aName = "NotificationWorkerRunnable")
-      : MainThreadWorkerRunnable(aWorkerPrivate, aName) {}
+      : MainThreadWorkerRunnable(aName) {}
 
   bool WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override {
     aWorkerPrivate->AssertIsOnWorkerThread();
@@ -426,10 +426,10 @@ class NotificationRef final {
         RefPtr<ReleaseNotificationRunnable> r =
             new ReleaseNotificationRunnable(notification);
 
-        if (!r->Dispatch()) {
+        if (!r->Dispatch(notification->mWorkerPrivate)) {
           RefPtr<ReleaseNotificationControlRunnable> r =
               new ReleaseNotificationControlRunnable(notification);
-          MOZ_ALWAYS_TRUE(r->Dispatch());
+          MOZ_ALWAYS_TRUE(r->Dispatch(notification->mWorkerPrivate));
         }
       } else {
         notification->AssertIsOnTargetThread();
@@ -1067,15 +1067,16 @@ class NotificationClickWorkerRunnable final
                                    "NotificationClickWorkerRunnable"),
         mNotification(aNotification),
         mWindow(aWindow) {
-    MOZ_ASSERT_IF(mWorkerPrivate->IsServiceWorker(), !mWindow);
+    MOZ_ASSERT_IF(mNotification->mWorkerPrivate->IsServiceWorker(), !mWindow);
   }
 
   void WorkerRunInternal(WorkerPrivate* aWorkerPrivate) override {
     bool doDefaultAction = mNotification->DispatchClickEvent();
-    MOZ_ASSERT_IF(mWorkerPrivate->IsServiceWorker(), !doDefaultAction);
+    MOZ_ASSERT_IF(mNotification->mWorkerPrivate->IsServiceWorker(),
+                  !doDefaultAction);
     if (doDefaultAction) {
       RefPtr<FocusWindowRunnable> r = new FocusWindowRunnable(mWindow);
-      mWorkerPrivate->DispatchToMainThread(r.forget());
+      mNotification->mWorkerPrivate->DispatchToMainThread(r.forget());
     }
   }
 };
@@ -1175,7 +1176,7 @@ WorkerNotificationObserver::Observe(nsISupports* aSubject, const char* aTopic,
 
   MOZ_ASSERT(notification->mWorkerPrivate);
 
-  RefPtr<WorkerRunnable> r;
+  RefPtr<WorkerThreadRunnable> r;
   if (!strcmp("alertclickcallback", aTopic)) {
     nsPIDOMWindowInner* window = nullptr;
     if (!notification->mWorkerPrivate->IsServiceWorker()) {
@@ -1207,7 +1208,7 @@ WorkerNotificationObserver::Observe(nsISupports* aSubject, const char* aTopic,
   }
 
   MOZ_ASSERT(r);
-  if (!r->Dispatch()) {
+  if (!r->Dispatch(notification->mWorkerPrivate)) {
     NS_WARNING("Could not dispatch event to worker notification");
   }
   return NS_OK;
@@ -1316,6 +1317,8 @@ bool Notification::IsInPrivateBrowsing() {
   return false;
 }
 
+// Step 4 of
+// https://notifications.spec.whatwg.org/#dom-notification-notification
 void Notification::ShowInternal() {
   AssertIsOnMainThread();
   MOZ_ASSERT(mTempRef,
@@ -1330,13 +1333,15 @@ void Notification::ShowInternal() {
   std::swap(ownership, mTempRef);
   MOZ_ASSERT(ownership->GetNotification() == this);
 
-  nsresult rv = PersistNotification();
-  if (NS_FAILED(rv)) {
-    NS_WARNING("Could not persist Notification");
-  }
-
   nsCOMPtr<nsIAlertsService> alertService = components::Alerts::Service();
 
+  // Step 4.1: If the result of getting the notifications permission state is
+  // not "granted", then queue a task to fire an event named error on this, and
+  // abort these steps.
+  //
+  // XXX(krosylight): But this function is also triggered by
+  // Notification::ShowPersistentNotification which already does its own
+  // permission check. Can we split this?
   ErrorResult result;
   NotificationPermission permission = NotificationPermission::Denied;
   if (mWorkerPrivate) {
@@ -1351,18 +1356,33 @@ void Notification::ShowInternal() {
     if (mWorkerPrivate) {
       RefPtr<NotificationEventWorkerRunnable> r =
           new NotificationEventWorkerRunnable(this, u"error"_ns);
-      if (!r->Dispatch()) {
+      if (!r->Dispatch(mWorkerPrivate)) {
         NS_WARNING("Could not dispatch event to worker notification");
       }
     } else {
       DispatchTrustedEvent(u"error"_ns);
     }
+    mIsClosed = true;
     return;
   }
 
+  // Preparing for Step 4.2 the fetch steps. The actual work happens in
+  // nsIAlertNotification::LoadImage
   nsAutoString iconUrl;
   nsAutoString soundUrl;
   ResolveIconAndSoundURL(iconUrl, soundUrl);
+
+  // Step 4.3 the show steps, which are almost all about processing `tag` and
+  // then displaying the notification. Both are handled by
+  // nsIAlertsService::ShowAlert/PersistentNotification. The below is all about
+  // constructing the observer (for show and close events) right and ultimately
+  // call the alerts service function.
+
+  // XXX(krosylight): Non-persistent notifications probably don't need this
+  nsresult rv = PersistNotification();
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Could not persist Notification");
+  }
 
   bool isPersistent = false;
   nsCOMPtr<nsIObserver> observer;
@@ -1765,7 +1785,7 @@ class WorkerGetCallback final : public ScopeCheckingGetCallback {
     RefPtr<WorkerGetResultRunnable> r = new WorkerGetResultRunnable(
         proxy->GetWorkerPrivate(), proxy, std::move(mStrings));
 
-    r->Dispatch();
+    r->Dispatch(proxy->GetWorkerPrivate());
     return NS_OK;
   }
 
