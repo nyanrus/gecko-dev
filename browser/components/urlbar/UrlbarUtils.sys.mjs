@@ -113,8 +113,7 @@ export var UrlbarUtils = {
     TABS: 4,
     OTHER_LOCAL: 5,
     OTHER_NETWORK: 6,
-    ACTIONS: 7,
-    ADDON: 8,
+    ADDON: 7,
   },
 
   // This defines icon locations that are commonly used in the UI.
@@ -227,13 +226,6 @@ export var UrlbarUtils = {
         icon: "chrome://browser/skin/history.svg",
         pref: "shortcuts.history",
         telemetryLabel: "history",
-      },
-      {
-        source: UrlbarUtils.RESULT_SOURCE.ACTIONS,
-        restrict: lazy.UrlbarTokenizer.RESTRICT.ACTION,
-        icon: "chrome://browser/skin/quickactions.svg",
-        pref: "shortcuts.quickactions",
-        telemetryLabel: "actions",
       },
     ];
   },
@@ -854,7 +846,7 @@ export var UrlbarUtils = {
    * @returns {string} The modified paste data.
    */
   stripUnsafeProtocolOnPaste(pasteData) {
-    while (true) {
+    for (;;) {
       let scheme = "";
       try {
         scheme = Services.io.extractScheme(pasteData);
@@ -1279,8 +1271,6 @@ export var UrlbarUtils = {
         if (result.providerName == "TabToSearch") {
           // This is the onboarding result.
           return "tabtosearch";
-        } else if (result.providerName == "quickactions") {
-          return "quickaction";
         } else if (result.providerName == "Weather") {
           return "weather";
         }
@@ -1435,14 +1425,10 @@ export var UrlbarUtils = {
         switch (result.providerName) {
           case "calculator":
             return "calc";
-          case "quickactions":
-            return "action";
           case "TabToSearch":
             return "tab_to_search";
           case "UnitConversion":
             return "unit";
-          case "UrlbarProviderContextualSearch":
-            return "site_specific_contextual_search";
           case "UrlbarProviderQuickSuggest":
             return this._getQuickSuggestTelemetryType(result);
           case "UrlbarProviderQuickSuggestContextualOptIn":
@@ -1535,28 +1521,6 @@ export var UrlbarUtils = {
     return "unknown";
   },
 
-  /**
-   * Extracts a subtype for search engagement telemetry from a result and the picked element.
-   *
-   * @param {UrlbarResult} result The result to analyze.
-   * @param {DOMElement} element The picked view element. Nullable.
-   * @returns {string} Subtype as string.
-   */
-  searchEngagementTelemetrySubtype(result, element) {
-    if (!result) {
-      return "";
-    }
-
-    if (
-      result.providerName === "quickactions" &&
-      element?.classList.contains("urlbarView-quickaction-button")
-    ) {
-      return element.dataset.key;
-    }
-
-    return "";
-  },
-
   _getQuickSuggestTelemetryType(result) {
     if (result.payload.telemetryType == "weather") {
       // Return "weather" without the usual source prefix for consistency with
@@ -1641,6 +1605,17 @@ UrlbarUtils.RESULT_PAYLOAD_SCHEMA = {
     type: "object",
     required: ["url"],
     properties: {
+      action: {
+        type: "object",
+        properties: {
+          l10nId: {
+            type: "string",
+          },
+          key: {
+            type: "string",
+          },
+        },
+      },
       displayUrl: {
         type: "string",
       },
@@ -1829,6 +1804,9 @@ UrlbarUtils.RESULT_PAYLOAD_SCHEMA = {
         type: "object",
       },
       isBlockable: {
+        type: "boolean",
+      },
+      isManageable: {
         type: "boolean",
       },
       isPinned: {
@@ -2175,6 +2153,8 @@ export class UrlbarQueryContext {
     this.pendingHeuristicProviders = new Set();
     this.deferUserSelectionProviders = new Set();
     this.trimmedSearchString = this.searchString.trim();
+    this.lowerCaseSearchString = this.searchString.toLowerCase();
+    this.trimmedLowerCaseSearchString = this.trimmedSearchString.toLowerCase();
     this.userContextId =
       lazy.UrlbarProviderOpenTabs.getUserContextIdForOpenPagesTable(
         options.userContextId,
@@ -2431,21 +2411,12 @@ export class UrlbarProvider {
    * @param {string} _state
    *   The state of the engagement, one of the following strings:
    *
-   *   start
-   *       A new query has started in the urlbar.
    *   engagement
    *       The user picked a result in the urlbar or used paste-and-go.
    *   abandonment
    *       The urlbar was blurred (i.e., lost focus).
-   *   discard
-   *       This doesn't correspond to a user action, but it means that the
-   *       urlbar has discarded the engagement for some reason, and the
-   *       `onEngagement` implementation should ignore it.
-   *
    * @param {UrlbarQueryContext} _queryContext
-   *   The engagement's query context.  This is *not* guaranteed to be defined
-   *   when `state` is "start".  It will always be defined for "engagement" and
-   *   "abandonment".
+   *   The engagement's query context.
    * @param {object} _details
    *   This object is non-empty only when `state` is "engagement" or
    *   "abandonment", and it describes the search string and engaged result.
@@ -2479,7 +2450,7 @@ export class UrlbarProvider {
    * @param {UrlbarController} _controller
    *  The associated controller.
    */
-  onEngagement(_state, _queryContext, _details, _controller) {}
+  onLegacyEngagement(_state, _queryContext, _details, _controller) {}
 
   /**
    * Called before a result from the provider is selected. See `onSelection`
@@ -2497,8 +2468,8 @@ export class UrlbarProvider {
    * Called when a result from the provider is selected. "Selected" refers to
    * the user highlighing the result with the arrow keys/Tab, before it is
    * picked. onSelection is also called when a user clicks a result. In the
-   * event of a click, onSelection is called just before onEngagement. Note that
-   * this is called when heuristic results are pre-selected.
+   * event of a click, onSelection is called just before onLegacyEngagement.
+   * Note that this is called when heuristic results are pre-selected.
    *
    * @param {UrlbarResult} _result
    *   The result that was selected.
@@ -2581,8 +2552,8 @@ export class UrlbarProvider {
   /**
    * Gets the list of commands that should be shown in the result menu for a
    * given result from the provider. All commands returned by this method should
-   * be handled by implementing `onEngagement()` with the possible exception of
-   * commands automatically handled by the urlbar, like "help".
+   * be handled by implementing `onLegacyEngagement()` with the possible
+   * exception of commands automatically handled by the urlbar, like "help".
    *
    * @param {UrlbarResult} _result
    *   The menu will be shown for this result.
@@ -2594,8 +2565,8 @@ export class UrlbarProvider {
    *   {string} name
    *     The name of the command. Must be specified unless `children` is
    *     present. When a command is picked, its name will be passed as
-   *     `details.selType` to `onEngagement()`. The special name "separator"
-   *     will create a menu separator.
+   *     `details.selType` to `onLegacyEngagement()`. The special name
+   *     "separator" will create a menu separator.
    *   {object} l10n
    *     An l10n object for the command's label: `{ id, args }`
    *     Must be specified unless `name` is "separator".

@@ -24,8 +24,10 @@ UNSUPPORTED_FEATURES = set(
         "Atomics.waitAsync",  # Bug 1467846
         "legacy-regexp",  # Bug 1306461
         "regexp-duplicate-named-groups",  # Bug 1773135
-        "json-parse-with-source",  # Bug 1658310
         "set-methods",  # Bug 1805038
+        "Float16Array",  # Bug 1833646
+        "explicit-resource-management",  # Bug 1569081
+        "regexp-modifiers",
     ]
 )
 FEATURE_CHECK_NEEDED = {
@@ -38,6 +40,8 @@ FEATURE_CHECK_NEEDED = {
     "iterator-helpers": "!this.hasOwnProperty('Iterator')",  # Bug 1568906
     "Intl.Segmenter": "!Intl.Segmenter",  # Bug 1423593
     "resizable-arraybuffer": "!ArrayBuffer.prototype.resize",  # Bug 1670026
+    "uint8array-base64": "!Uint8Array.fromBase64",  # Bug 1862220
+    "json-parse-with-source": "!JSON.hasOwnProperty('isRawJSON')",  # Bug 1658310
 }
 RELEASE_OR_BETA = set(
     [
@@ -51,6 +55,8 @@ SHELL_OPTIONS = {
     "iterator-helpers": "--enable-iterator-helpers",
     "symbols-as-weakmap-keys": "--enable-symbols-as-weakmap-keys",
     "resizable-arraybuffer": "--enable-arraybuffer-resizable",
+    "uint8array-base64": "--enable-uint8array-base64",
+    "json-parse-with-source": "--enable-json-parse-with-source",
 }
 
 
@@ -584,7 +590,7 @@ def fetch_local_changes(inDir, outDir, srcDir, strictTests):
     # TODO: fail if it's in the default branch? or require a branch name?
     # Checks for unstaged or non committed files. A clean branch provides a clean status.
     status = subprocess.check_output(
-        ("git -C %s status --porcelain" % srcDir).split(" ")
+        ("git -C %s status --porcelain" % srcDir).split(" "), encoding="utf-8"
     )
 
     if status.strip():
@@ -595,31 +601,35 @@ def fetch_local_changes(inDir, outDir, srcDir, strictTests):
 
     # Captures the branch name to be used on the output
     branchName = subprocess.check_output(
-        ("git -C %s rev-parse --abbrev-ref HEAD" % srcDir).split(" ")
+        ("git -C %s rev-parse --abbrev-ref HEAD" % srcDir).split(" "), encoding="utf-8"
     ).split("\n")[0]
 
     # Fetches the file names to import
     files = subprocess.check_output(
-        ("git -C %s diff main --diff-filter=ACMR --name-only" % srcDir).split(" ")
+        ("git -C %s diff main --diff-filter=ACMR --name-only" % srcDir).split(" "),
+        encoding="utf-8",
     )
 
     # Fetches the deleted files to print an output log. This can be used to
     # set up the skip list, if necessary.
     deletedFiles = subprocess.check_output(
-        ("git -C %s diff main --diff-filter=D --name-only" % srcDir).split(" ")
+        ("git -C %s diff main --diff-filter=D --name-only" % srcDir).split(" "),
+        encoding="utf-8",
     )
 
     # Fetches the modified files as well for logging to support maintenance
     # in the skip list.
     modifiedFiles = subprocess.check_output(
-        ("git -C %s diff main --diff-filter=M --name-only" % srcDir).split(" ")
+        ("git -C %s diff main --diff-filter=M --name-only" % srcDir).split(" "),
+        encoding="utf-8",
     )
 
     # Fetches the renamed files for the same reason, this avoids duplicate
     # tests if running the new local folder and the general imported Test262
     # files.
     renamedFiles = subprocess.check_output(
-        ("git -C %s diff main --diff-filter=R --summary" % srcDir).split(" ")
+        ("git -C %s diff main --diff-filter=R --summary" % srcDir).split(" "),
+        encoding="utf-8",
     )
 
     # Print some friendly output

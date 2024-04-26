@@ -27,6 +27,7 @@
 #include "gc/GC-inl.h"
 #include "gc/Marking-inl.h"
 #include "gc/Nursery-inl.h"
+#include "gc/StableCellHasher-inl.h"
 #include "gc/WeakMap-inl.h"
 #include "vm/JSScript-inl.h"
 #include "vm/Realm-inl.h"
@@ -367,17 +368,11 @@ void Zone::checkAllCrossCompartmentWrappersAfterMovingGC() {
 }
 
 void Zone::checkStringWrappersAfterMovingGC() {
-  for (StringWrapperMap::Enum e(crossZoneStringWrappers()); !e.empty();
-       e.popFront()) {
-    // Assert that the postbarriers have worked and that nothing is left in the
-    // wrapper map that points into the nursery, and that the hash table entries
-    // are discoverable.
-    auto key = e.front().key();
-    CheckGCThingAfterMovingGC(key.get());
-
-    auto ptr = crossZoneStringWrappers().lookup(key);
-    MOZ_RELEASE_ASSERT(ptr.found() && &*ptr == &e.front());
-  }
+  CheckTableAfterMovingGC(crossZoneStringWrappers(), [](const auto& entry) {
+    JSString* key = entry.key().get();
+    CheckGCThingAfterMovingGC(key);
+    return key;
+  });
 }
 #endif
 
@@ -546,25 +541,24 @@ void JS::Zone::traceWeakJitScripts(JSTracer* trc) {
 
 void JS::Zone::beforeClearDelegateInternal(JSObject* wrapper,
                                            JSObject* delegate) {
+  // 'delegate' is no longer the delegate of 'wrapper'.
   MOZ_ASSERT(js::gc::detail::GetDelegate(wrapper) == delegate);
   MOZ_ASSERT(needsIncrementalBarrier());
   MOZ_ASSERT(!RuntimeFromMainThreadIsHeapMajorCollecting(this));
-  runtimeFromMainThread()->gc.marker().severWeakDelegate(wrapper, delegate);
-}
 
-void JS::Zone::afterAddDelegateInternal(JSObject* wrapper) {
-  MOZ_ASSERT(!RuntimeFromMainThreadIsHeapMajorCollecting(this));
-  JSObject* delegate = js::gc::detail::GetDelegate(wrapper);
-  if (delegate) {
-    runtimeFromMainThread()->gc.marker().restoreWeakDelegate(wrapper, delegate);
+  // If |wrapper| might be a key in a weak map, trigger a barrier to account for
+  // the removal of the automatically added edge from delegate to wrapper.
+  if (HasUniqueId(wrapper)) {
+    PreWriteBarrier(wrapper);
   }
 }
 
 #ifdef JSGC_HASH_TABLE_CHECKS
 void JS::Zone::checkUniqueIdTableAfterMovingGC() {
-  for (auto r = uniqueIds().all(); !r.empty(); r.popFront()) {
-    js::gc::CheckGCThingAfterMovingGC(r.front().key());
-  }
+  CheckTableAfterMovingGC(uniqueIds(), [](const auto& entry) {
+    js::gc::CheckGCThingAfterMovingGC(entry.key());
+    return entry.key();
+  });
 }
 #endif
 
@@ -622,7 +616,7 @@ void Zone::fixupAfterMovingGC() {
 }
 
 void Zone::purgeAtomCache() {
-  atomCache().clearAndCompact();
+  atomCache_.ref().reset();
 
   // Also purge the dtoa caches so that subsequent lookups populate atom
   // cache too.
@@ -863,46 +857,43 @@ void Zone::fixupScriptMapsAfterMovingGC(JSTracer* trc) {
 #ifdef JSGC_HASH_TABLE_CHECKS
 void Zone::checkScriptMapsAfterMovingGC() {
   if (scriptCountsMap) {
-    for (auto r = scriptCountsMap->all(); !r.empty(); r.popFront()) {
-      BaseScript* script = r.front().key();
-      MOZ_ASSERT(script->zone() == this);
+    CheckTableAfterMovingGC(*scriptCountsMap, [this](const auto& entry) {
+      BaseScript* script = entry.key();
+      MOZ_RELEASE_ASSERT(script->zone() == this);
       CheckGCThingAfterMovingGC(script);
-      auto ptr = scriptCountsMap->lookup(script);
-      MOZ_RELEASE_ASSERT(ptr.found() && &*ptr == &r.front());
-    }
+      return script;
+    });
   }
 
   if (scriptLCovMap) {
-    for (auto r = scriptLCovMap->all(); !r.empty(); r.popFront()) {
-      BaseScript* script = r.front().key();
-      MOZ_ASSERT(script->zone() == this);
+    CheckTableAfterMovingGC(*scriptLCovMap, [this](const auto& entry) {
+      BaseScript* script = entry.key();
+      MOZ_RELEASE_ASSERT(script->zone() == this);
       CheckGCThingAfterMovingGC(script);
-      auto ptr = scriptLCovMap->lookup(script);
-      MOZ_RELEASE_ASSERT(ptr.found() && &*ptr == &r.front());
-    }
+      return script;
+    });
   }
 
 #  ifdef MOZ_VTUNE
   if (scriptVTuneIdMap) {
-    for (auto r = scriptVTuneIdMap->all(); !r.empty(); r.popFront()) {
-      BaseScript* script = r.front().key();
-      MOZ_ASSERT(script->zone() == this);
+    CheckTableAfterMovingGC(*scriptVTuneIdMap, [this](const auto& entry) {
+      BaseScript* script = entry.key();
+      MOZ_RELEASE_ASSERT(script->zone() == this);
       CheckGCThingAfterMovingGC(script);
-      auto ptr = scriptVTuneIdMap->lookup(script);
-      MOZ_RELEASE_ASSERT(ptr.found() && &*ptr == &r.front());
-    }
+      return script;
+    });
   }
 #  endif  // MOZ_VTUNE
 
 #  ifdef JS_CACHEIR_SPEW
   if (scriptFinalWarmUpCountMap) {
-    for (auto r = scriptFinalWarmUpCountMap->all(); !r.empty(); r.popFront()) {
-      BaseScript* script = r.front().key();
-      MOZ_ASSERT(script->zone() == this);
-      CheckGCThingAfterMovingGC(script);
-      auto ptr = scriptFinalWarmUpCountMap->lookup(script);
-      MOZ_RELEASE_ASSERT(ptr.found() && &*ptr == &r.front());
-    }
+    CheckTableAfterMovingGC(*scriptFinalWarmUpCountMap,
+                            [this](const auto& entry) {
+                              BaseScript* script = entry.key();
+                              MOZ_RELEASE_ASSERT(script->zone() == this);
+                              CheckGCThingAfterMovingGC(script);
+                              return script;
+                            });
   }
 #  endif  // JS_CACHEIR_SPEW
 }
@@ -980,21 +971,4 @@ bool Zone::registerObjectWithWeakPointers(JSObject* obj) {
   MOZ_ASSERT(obj->getClass()->hasTrace());
   MOZ_ASSERT(!IsInsideNursery(obj));
   return objectsWithWeakPointers.ref().append(obj);
-}
-
-js::DependentScriptSet* Zone::getOrCreateDependentScriptSet(
-    JSContext* cx, js::InvalidatingFuse* fuse) {
-  for (auto& dss : fuseDependencies) {
-    if (dss.associatedFuse == fuse) {
-      return &dss;
-    }
-  }
-
-  if (!fuseDependencies.emplaceBack(cx, fuse)) {
-    return nullptr;
-  }
-
-  auto& dss = fuseDependencies.back();
-  MOZ_ASSERT(dss.associatedFuse == fuse);
-  return &dss;
 }

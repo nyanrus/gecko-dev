@@ -604,15 +604,6 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-#ifdef ENABLE_JSON_PARSE_WITH_SOURCE
-  value = BooleanValue(true);
-#else
-  value = BooleanValue(false);
-#endif
-  if (!JS_SetProperty(cx, info, "json-parse-with-source", value)) {
-    return false;
-  }
-
 #ifdef FUZZING
   value = BooleanValue(true);
 #else
@@ -1620,7 +1611,7 @@ static bool WasmLosslessInvoke(JSContext* cx, unsigned argc, Value* vp) {
   if (!wasmCallFrame.resize(len)) {
     return false;
   }
-  wasmCallFrame[0].set(args.calleev());
+  wasmCallFrame[0].set(ObjectValue(*func));
   wasmCallFrame[1].set(args.thisv());
   // Copy over the arguments needed to invoke the provided wasm function,
   // skipping the wasm function we're calling that is at `args.get(0)`.
@@ -2134,7 +2125,7 @@ static bool WasmDumpIon(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
-enum class Flag { Tier2Complete, Deserialized };
+enum class Flag { Tier2Complete, Deserialized, ParsedBranchHints };
 
 static bool WasmReturnFlag(JSContext* cx, unsigned argc, Value* vp, Flag flag) {
   CallArgs args = CallArgsFromVp(argc, vp);
@@ -2158,6 +2149,9 @@ static bool WasmReturnFlag(JSContext* cx, unsigned argc, Value* vp, Flag flag) {
       break;
     case Flag::Deserialized:
       b = module->module().loggingDeserialized();
+      break;
+    case Flag::ParsedBranchHints:
+      b = module->module().metadata().parsedBranchHints;
       break;
   }
 
@@ -2229,6 +2223,12 @@ static bool WasmHasTier2CompilationCompleted(JSContext* cx, unsigned argc,
 static bool WasmLoadedFromCache(JSContext* cx, unsigned argc, Value* vp) {
   return WasmReturnFlag(cx, argc, vp, Flag::Deserialized);
 }
+
+#ifdef ENABLE_WASM_BRANCH_HINTING
+static bool WasmParsedBranchHints(JSContext* cx, unsigned argc, Value* vp) {
+  return WasmReturnFlag(cx, argc, vp, Flag::ParsedBranchHints);
+}
+#endif  // ENABLE_WASM_BRANCH_HINTING
 
 static bool WasmBuiltinI8VecMul(JSContext* cx, unsigned argc, Value* vp) {
   if (!wasm::HasSupport(cx)) {
@@ -3711,6 +3711,85 @@ static bool NewString(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   args.rval().setString(dest);
+  return true;
+}
+
+static bool NewDependentString(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+
+  RootedString src(cx, ToString(cx, args.get(0)));
+  if (!src) {
+    return false;
+  }
+
+  uint64_t indexStart = 0;
+  mozilla::Maybe<uint64_t> indexEnd;
+  gc::Heap heap = gc::Heap::Default;
+  mozilla::Maybe<gc::Heap> requiredHeap;
+
+  if (!ToIndex(cx, args.get(1), &indexStart)) {
+    return false;
+  }
+
+  Rooted<Value> options(cx);
+  if (args.get(2).isObject()) {
+    options = args[2];
+  } else {
+    uint64_t idx;
+    if (args.hasDefined(2)) {
+      if (!ToIndex(cx, args.get(2), &idx)) {
+        return false;
+      }
+      indexEnd.emplace(idx);
+    }
+    options = args.get(3);
+  }
+
+  if (options.isObject()) {
+    Rooted<Value> v(cx);
+    Rooted<JSObject*> optObj(cx, &options.toObject());
+    if (!JS_GetProperty(cx, optObj, "tenured", &v)) {
+      return false;
+    }
+    if (v.isBoolean()) {
+      requiredHeap.emplace(v.toBoolean() ? gc::Heap::Tenured
+                                         : gc::Heap::Default);
+      heap = *requiredHeap;
+    }
+  }
+
+  if (indexEnd.isNothing()) {
+    // Read the length now that no more JS code can run.
+    indexEnd.emplace(src->length());
+  }
+  if (indexStart > src->length() || *indexEnd > src->length() ||
+      indexStart >= *indexEnd) {
+    JS_ReportErrorASCII(cx, "invalid dependent string bounds");
+    return false;
+  }
+  if (!src->ensureLinear(cx)) {
+    return false;
+  }
+  Rooted<JSString*> result(
+      cx, js::NewDependentString(cx, src, indexStart, *indexEnd - indexStart,
+                                 heap));
+  if (!result) {
+    return false;
+  }
+  if (!result->isDependent()) {
+    JS_ReportErrorASCII(cx, "resulting string is not dependent (too short?)");
+    return false;
+  }
+
+  if (requiredHeap.isSome()) {
+    MOZ_ASSERT_IF(*requiredHeap == gc::Heap::Tenured, result->isTenured());
+    if ((*requiredHeap == gc::Heap::Default) && result->isTenured()) {
+      JS_ReportErrorASCII(cx, "nursery string created in tenured heap");
+      return false;
+    }
+  }
+
+  args.rval().setString(result);
   return true;
 }
 
@@ -7183,7 +7262,7 @@ static bool SetImmutablePrototype(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
 static bool DumpStringRepresentation(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -7221,7 +7300,6 @@ static bool GetStringRepresentation(JSContext* cx, unsigned argc, Value* vp) {
   args.rval().setString(rep);
   return true;
 }
-
 #endif
 
 static bool ParseCompileOptionsForModule(JSContext* cx,
@@ -7237,9 +7315,7 @@ static bool ParseCompileOptionsForModule(JSContext* cx,
     options.setModule();
     isModule = true;
 
-    // js::ParseCompileOptions should already be called.
-    if (options.lineno == 0) {
-      JS_ReportErrorASCII(cx, "Module cannot be compiled with lineNumber == 0");
+    if (!ValidateModuleCompileOptions(cx, options)) {
       return false;
     }
   } else {
@@ -9435,6 +9511,15 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "   - maybeExternal: create an external string, unless the data fits within an\n"
 "     inline string. Inline strings may be nursery-allocated."),
 
+    JS_FN_HELP("newDependentString", NewDependentString, 2, 0,
+"newDependentString(str, indexStart[, indexEnd] [, options])",
+"  Essentially the same as str.substring() but insist on\n"
+"  creating a dependent string and failing if not. Also has options to\n"
+"  control the heap the string object is allocated into:\n"
+"  \n"
+"   - tenured: if true, allocate in the tenured heap or throw. If false,\n"
+"     allocate in the nursery or throw."),
+
     JS_FN_HELP("ensureLinearString", EnsureLinearString, 1, 0,
 "ensureLinearString(str)",
 "  Ensures str is a linear (non-rope) string and returns it."),
@@ -9880,6 +9965,14 @@ JS_FOR_WASM_FEATURES(WASM_FEATURE)
 "  Gets the length of a WebAssembly GC array."),
 #endif // ENABLE_WASM_GC
 
+#ifdef ENABLE_WASM_BRANCH_HINTING
+    JS_FN_HELP("wasmParsedBranchHints", WasmParsedBranchHints, 1, 0,
+"wasmParsedBranchHints(module)",
+"  Returns a boolean indicating whether a given module has successfully parsed a\n"
+"  custom branch hinting section."),
+
+#endif // ENABLE_WASM_BRANCH_HINTING
+
     JS_FN_HELP("largeArrayBufferSupported", LargeArrayBufferSupported, 0, 0,
 "largeArrayBufferSupported()",
 "  Returns true if array buffers larger than 2GB can be allocated."),
@@ -10058,20 +10151,6 @@ JS_FOR_WASM_FEATURES(WASM_FEATURE)
 "wasmMetadataAnalysis(wasmObject)",
 "  Prints an analysis of the size of metadata on this wasm object.\n"),
 
-#if defined(DEBUG) || defined(JS_JITSPEW)
-    JS_FN_HELP("dumpObject", DumpObject, 1, 0,
-"dumpObject(obj)",
-"  Dump an internal representation of an object."),
-
-    JS_FN_HELP("dumpValue", DumpValue, 1, 0,
-"dumpValue(v)",
-"  Dump an internal representation of a value."),
-
-    JS_FN_HELP("dumpValueToString", DumpValueToString, 1, 0,
-"dumpValue(v)",
-"  Return a dump of an internal representation of a value."),
-#endif
-
     JS_FN_HELP("sharedMemoryEnabled", SharedMemoryEnabled, 0, 0,
 "sharedMemoryEnabled()",
 "  Return true if SharedArrayBuffer and Atomics are enabled"),
@@ -10128,17 +10207,6 @@ JS_FOR_WASM_FEATURES(WASM_FEATURE)
 "  immutable (or if it already was immutable), false otherwise.  Throws in case\n"
 "  of internal error, or if the operation doesn't even make sense (for example,\n"
 "  because the object is a revoked proxy)."),
-
-#ifdef DEBUG
-    JS_FN_HELP("dumpStringRepresentation", DumpStringRepresentation, 1, 0,
-"dumpStringRepresentation(str)",
-"  Print a human-readable description of how the string |str| is represented.\n"),
-
-    JS_FN_HELP("stringRepresentation", GetStringRepresentation, 1, 0,
-"stringRepresentation(str)",
-"  Return a human-readable description of how the string |str| is represented.\n"),
-
-#endif
 
     JS_FN_HELP("allocationMarker", AllocationMarker, 0, 0,
 "allocationMarker([options])",
@@ -10427,6 +10495,29 @@ JS_FN_HELP("getEnvironmentObjectType", GetEnvironmentObjectType, 1, 0,
       "getFuseState()",
       "  Return an object describing the calling realm's fuse state, "
       "as well as the state of any runtime fuses."),
+
+#if defined(DEBUG) || defined(JS_JITSPEW)
+    JS_FN_HELP("dumpObject", DumpObject, 1, 0,
+"dumpObject(obj)",
+"  Dump an internal representation of an object."),
+
+    JS_FN_HELP("dumpValue", DumpValue, 1, 0,
+"dumpValue(v)",
+"  Dump an internal representation of a value."),
+
+    JS_FN_HELP("dumpValueToString", DumpValueToString, 1, 0,
+"dumpValue(v)",
+"  Return a dump of an internal representation of a value."),
+
+    JS_FN_HELP("dumpStringRepresentation", DumpStringRepresentation, 1, 0,
+"dumpStringRepresentation(str)",
+"  Print a human-readable description of how the string |str| is represented.\n"),
+
+    JS_FN_HELP("stringRepresentation", GetStringRepresentation, 1, 0,
+"stringRepresentation(str)",
+"  Return a human-readable description of how the string |str| is represented.\n"),
+
+#endif
 
     JS_FS_HELP_END
 };

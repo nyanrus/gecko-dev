@@ -84,21 +84,6 @@ export let FormAutofillStatus = {
       Services.prefs.addObserver(ENABLED_AUTOFILL_CREDITCARDS_PREF, this);
     }
 
-    // We have to use empty window type to get all opened windows here because the
-    // window type parameter may not be available during startup.
-    for (let win of Services.wm.getEnumerator("")) {
-      let { documentElement } = win.document;
-      if (documentElement?.getAttribute("windowtype") == "navigator:browser") {
-        this.injectElements(win.document);
-      } else {
-        // Manually call onOpenWindow for windows that are already opened but not
-        // yet have the window type set. This ensures we inject the elements we need
-        // when its docuemnt is ready.
-        this.onOpenWindow(win);
-      }
-    }
-    Services.wm.addListener(this);
-
     Services.telemetry.setEventRecordingEnabled("creditcard", true);
     Services.telemetry.setEventRecordingEnabled("address", true);
   },
@@ -198,31 +183,6 @@ export let FormAutofillStatus = {
     this.updateStatus();
   },
 
-  injectElements(doc) {
-    Services.scriptloader.loadSubScript(
-      "chrome://formautofill/content/customElements.js",
-      doc.ownerGlobal
-    );
-  },
-
-  onOpenWindow(xulWindow) {
-    const win = xulWindow.docShell.domWindow;
-    win.addEventListener(
-      "load",
-      () => {
-        if (
-          win.document.documentElement.getAttribute("windowtype") ==
-          "navigator:browser"
-        ) {
-          this.injectElements(win.document);
-        }
-      },
-      { once: true }
-    );
-  },
-
-  onCloseWindow() {},
-
   async observe(subject, topic, data) {
     lazy.log.debug("observe:", topic, "with data:", data);
     switch (topic) {
@@ -307,17 +267,8 @@ export class FormAutofillParent extends JSWindowActorParent {
         break;
       }
       case "FormAutofill:GetRecords": {
-        const relayPromise = lazy.FirefoxRelay.autocompleteItemsAsync({
-          formOrigin: this.formOrigin,
-          scenarioName: data.scenarioName,
-          hasInput: !!data.searchString?.length,
-        });
-        const recordsPromise = FormAutofillParent._getRecords(data);
-        const [records, externalEntries] = await Promise.all([
-          recordsPromise,
-          relayPromise,
-        ]);
-        return { records, externalEntries };
+        const records = await FormAutofillParent.getRecords(data);
+        return { records };
       }
       case "FormAutofill:OnFormSubmit": {
         this.notifyMessageObservers("onFormSubmitted", data);
@@ -442,48 +393,85 @@ export class FormAutofillParent extends JSWindowActorParent {
   }
 
   /**
+   * Retrieves autocomplete entries for a given search string and data context.
+   *
+   * @param {string} searchString
+   *                 The search string used to filter autocomplete entries.
+   * @param {object} options
+   * @param {string} options.fieldName
+   *                 The name of the field for which autocomplete entries are being fetched.
+   * @param {string} options.scenarioName
+   *                 The scenario name used in the autocomplete operation to fetch external entries.
+   * @returns {Promise<object>} A promise that resolves to an object containing two properties: `records` and `externalEntries`.
+   *         `records` is an array of autofill records from the form's internal data, sorted by `timeLastUsed`.
+   *         `externalEntries` is an array of external autocomplete items fetched based on the scenario.
+   */
+  async searchAutoCompleteEntries(searchString, options) {
+    const { fieldName, scenarioName } = options;
+    const relayPromise = lazy.FirefoxRelay.autocompleteItemsAsync({
+      formOrigin: this.formOrigin,
+      scenarioName,
+      hasInput: !!searchString?.length,
+    });
+
+    const recordsPromise = FormAutofillParent.getRecords({
+      searchString,
+      fieldName,
+    });
+    const [records, externalEntries] = await Promise.all([
+      recordsPromise,
+      relayPromise,
+    ]);
+
+    // Sort addresses by timeLastUsed for showing the lastest used address at top.
+    records.sort((a, b) => b.timeLastUsed - a.timeLastUsed);
+
+    return { records, externalEntries };
+  }
+
+  /**
    * Get the records from profile store and return results back to content
    * process. It will decrypt the credit card number and append
    * "cc-number-decrypted" to each record if OSKeyStore isn't set.
    *
    * This is static as a unit test calls this.
    *
-   * @private
    * @param  {object} data
-   * @param  {string} data.collectionName
-   *         The name used to specify which collection to retrieve records.
    * @param  {string} data.searchString
    *         The typed string for filtering out the matched records.
-   * @param  {string} data.info
-   *         The input autocomplete property's information.
+   * @param  {string} data.collectionName
+   *         The name used to specify which collection to retrieve records.
+   * @param  {string} data.fieldName
+   *         The field name to search. If not specified, return all records in
+   *         the collection
    */
-  static async _getRecords({ collectionName, searchString, info }) {
-    let collection = lazy.gFormAutofillStorage[collectionName];
+  static async getRecords({ searchString, collectionName, fieldName }) {
+    // Derive the collection name from field name if it doesn't exist
+    collectionName ||=
+      FormAutofillUtils.getCollectionNameFromFieldName(fieldName);
+
+    const collection = lazy.gFormAutofillStorage[collectionName];
     if (!collection) {
       return [];
     }
 
-    let recordsInCollection = await collection.getAll();
-    if (!info || !info.fieldName || !recordsInCollection.length) {
-      return recordsInCollection;
+    const records = await collection.getAll();
+    if (!fieldName || !records.length) {
+      return records;
     }
 
-    let isCC = collectionName == CREDITCARDS_COLLECTION_NAME;
     // We don't filter "cc-number"
-    if (isCC && info.fieldName == "cc-number") {
-      recordsInCollection = recordsInCollection.filter(
-        record => !!record["cc-number"]
-      );
-      return recordsInCollection;
+    if (collectionName == CREDITCARDS_COLLECTION_NAME) {
+      if (fieldName == "cc-number") {
+        return records.filter(record => !!record["cc-number"]);
+      }
     }
 
-    let records = [];
-    let lcSearchString = searchString.toLowerCase();
-
-    for (let record of recordsInCollection) {
-      let fieldValue = record[info.fieldName];
+    const lcSearchString = searchString.toLowerCase();
+    return records.filter(record => {
+      const fieldValue = record[fieldName];
       if (!fieldValue) {
-        continue;
+        return false;
       }
 
       if (
@@ -493,19 +481,14 @@ export class FormAutofillParent extends JSWindowActorParent {
       ) {
         // Address autofill isn't supported for the record's country so we don't
         // want to attempt to potentially incorrectly fill the address fields.
-        continue;
+        return false;
       }
 
-      if (
-        lcSearchString &&
-        !String(fieldValue).toLowerCase().startsWith(lcSearchString)
-      ) {
-        continue;
-      }
-      records.push(record);
-    }
-
-    return records;
+      return (
+        !lcSearchString ||
+        String(fieldValue).toLowerCase().startsWith(lcSearchString)
+      );
+    });
   }
 
   async _onAddressSubmit(address, browser) {

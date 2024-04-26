@@ -56,6 +56,7 @@ const Template = ({
       .dateTimeFormat=${dateTimeFormat}
       .maxTabsLength=${maxTabsLength}
       .tabItems=${tabItems}
+      .updatesPaused=${false}
       @fxview-tab-list-secondary-action=${secondaryAction}
       @fxview-tab-list-primary-action=${primaryAction}
     >
@@ -84,7 +85,7 @@ let secondaryAction = e => {
   e.target.querySelector("panel-list").toggle(e.detail.originalEvent);
 };
 
-let primaryAction = e => {
+let primaryAction = () => {
   // Open in new tab
 };
 

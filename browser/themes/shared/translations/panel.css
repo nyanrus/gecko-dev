@@ -7,7 +7,7 @@
   width: 31em;
 }
 
-:where(#full-page-translations-panel) :is(description, label, menulist) {
+:where(.translations-panel) :is(description, label, menulist) {
   margin: 0;
 }
 
@@ -117,27 +117,46 @@ h1.translations-panel-header-wrapper {
   padding: 12px;
 }
 
-.select-translations-panel-button {
-  align-items: center;
-  justify-content: center;
-  margin-inline: 0;
-}
-
 .select-translations-panel-content {
   padding: var(--arrowpanel-padding);
   padding-block: 4px;
 }
 
 .select-translations-panel-copy-button {
+  list-style-image: url(chrome://global/skin/icons/edit-copy.svg);
   background-color: transparent;
-  font: message-box;
-  font-weight: var(--font-weight-bold);
-  &::before {
-    content: url(chrome://global/skin/icons/edit-copy.svg);
-    fill: currentColor;
-    margin-inline-end: 5px;
-    -moz-context-properties: fill;
+  -moz-context-properties: fill;
+  fill: currentColor;
+  margin: 0;
+
+  > .button-box {
+    gap: var(--space-xsmall);
   }
+
+  &.copied {
+    list-style-image: url(chrome://global/skin/icons/check.svg);
+  }
+}
+
+#select-translations-panel-footer-button-group {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: var(--space-xsmall);
+  justify-content: space-between;
+}
+
+#select-translations-panel-start-button-group,
+#select-translations-panel-end-button-group {
+  display: flex;
+  flex-grow: 1;
+}
+
+#select-translations-panel-start-button-group {
+  justify-content: flex-start;
+}
+
+#select-translations-panel-end-button-group {
+  justify-content: flex-end;
 }
 
 .select-translations-panel-header {
@@ -145,16 +164,35 @@ h1.translations-panel-header-wrapper {
   text-align: initial;
 }
 
-.select-translations-panel-label {
-  margin-inline: 2px;
+.select-translations-panel-label,
+.select-translations-panel-message-bar {
+  margin-block: 0 6px;
 }
 
 #select-translations-panel-lang-selection {
   gap: 6px;
 }
 
-#select-translations-panel-translation-area {
+.select-translations-panel-text-area {
   height: 8em;
-  margin-inline: 5px;
-  resize: none;
+  resize: vertical;
+
+  &:disabled {
+    color: var(--panel-disabled-color);
+    border-color: var(--panel-disabled-color);
+  }
+
+  &.translating {
+    -moz-context-properties: fill;
+    fill: currentColor;
+    background-image: url("chrome://global/skin/icons/loading.svg");
+    background-repeat: no-repeat;
+    background-position: 8px 8px;
+    background-size: var(--size-item-small);
+    padding-inline-start: calc(var(--size-item-small) + (2 * var(--space-small)));
+
+    &:-moz-locale-dir(rtl) {
+      background-position-x: right 8px;
+    }
+  }
 }

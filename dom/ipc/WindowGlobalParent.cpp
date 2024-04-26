@@ -10,6 +10,7 @@
 
 #include "mozilla/AntiTrackingUtils.h"
 #include "mozilla/AsyncEventDispatcher.h"
+#include "mozilla/BounceTrackingStorageObserver.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/ContentBlockingAllowList.h"
 #include "mozilla/dom/InProcessParent.h"
@@ -39,6 +40,7 @@
 #include "mozilla/Telemetry.h"
 #include "mozilla/Variant.h"
 #include "mozilla/ipc/ProtocolUtils.h"
+#include "MMPrinter.h"
 #include "nsContentUtils.h"
 #include "nsDocShell.h"
 #include "nsDocShellLoadState.h"
@@ -230,8 +232,8 @@ void WindowGlobalParent::OriginCounter::UpdateSiteOriginsFrom(
 }
 
 void WindowGlobalParent::OriginCounter::Accumulate() {
-  mozilla::glean::geckoview::per_document_site_origins.AccumulateSamples(
-      {mMaxOrigins});
+  mozilla::glean::geckoview::per_document_site_origins.AccumulateSingleSample(
+      mMaxOrigins);
 
   mMaxOrigins = 0;
   mOriginMap.Clear();
@@ -398,26 +400,20 @@ IPCResult WindowGlobalParent::RecvUpdateDocumentURI(NotNull<nsIURI*> aURI) {
       return IPC_FAIL(this, "Setting DocumentURI with unknown protocol.");
     }
 
-    auto isLoadableViaInternet = [](nsIURI* uri) {
-      return (uri && (net::SchemeIsHTTP(uri) || net::SchemeIsHTTPS(uri)));
-    };
-
-    if (isLoadableViaInternet(aURI)) {
-      nsCOMPtr<nsIURI> principalURI = mDocumentPrincipal->GetURI();
-      if (mDocumentPrincipal->GetIsNullPrincipal()) {
-        nsCOMPtr<nsIPrincipal> precursor =
-            mDocumentPrincipal->GetPrecursorPrincipal();
-        if (precursor) {
-          principalURI = precursor->GetURI();
-        }
+    nsCOMPtr<nsIURI> principalURI = mDocumentPrincipal->GetURI();
+    if (mDocumentPrincipal->GetIsNullPrincipal()) {
+      nsCOMPtr<nsIPrincipal> precursor =
+          mDocumentPrincipal->GetPrecursorPrincipal();
+      if (precursor) {
+        principalURI = precursor->GetURI();
       }
+    }
 
-      if (isLoadableViaInternet(principalURI) &&
-          !nsScriptSecurityManager::SecurityCompareURIs(principalURI, aURI)) {
-        return IPC_FAIL(this,
-                        "Setting DocumentURI with a different Origin than "
-                        "principal URI");
-      }
+    if (nsScriptSecurityManager::IsHttpOrHttpsAndCrossOrigin(principalURI,
+                                                             aURI)) {
+      return IPC_FAIL(this,
+                      "Setting DocumentURI with a different Origin than "
+                      "principal URI");
     }
   }
 
@@ -570,6 +566,8 @@ IPCResult WindowGlobalParent::RecvRawMessage(
     stack.emplace();
     stack->BorrowFromClonedMessageData(*aStack);
   }
+  MMPrinter::Print("WindowGlobalParent::RecvRawMessage", aMeta.actorName(),
+                   aMeta.messageName(), aData);
   ReceiveRawMessage(aMeta, std::move(data), std::move(stack));
   return IPC_OK();
 }
@@ -1708,8 +1706,29 @@ IPCResult WindowGlobalParent::RecvSetCookies(
                         aCookies, GetBrowsingContext());
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(WindowGlobalParent, WindowContext,
-                                   mPageUseCountersWindow)
+IPCResult WindowGlobalParent::RecvOnInitialStorageAccess() {
+  DebugOnly<nsresult> rv =
+      BounceTrackingStorageObserver::OnInitialStorageAccess(this);
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to notify storage access");
+  return IPC_OK();
+}
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(WindowGlobalParent)
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(WindowGlobalParent,
+                                                WindowContext)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mPageUseCountersWindow)
+  tmp->UnlinkManager();
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(WindowGlobalParent,
+                                                  WindowContext)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPageUseCountersWindow)
+  if (!tmp->IsInProcess()) {
+    CycleCollectionNoteChild(cb, static_cast<BrowserParent*>(tmp->Manager()),
+                             "Manager()");
+  }
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(WindowGlobalParent,
                                                WindowContext)

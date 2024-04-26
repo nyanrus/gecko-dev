@@ -66,9 +66,12 @@ policy-DisableDefaultBrowserAgent = Prevent the default browser agent from takin
 
 policy-DisableDeveloperTools = Block access to the developer tools.
 
+policy-DisableEncryptedClientHello = Disable use of the TLS feature Encrypted Client Hello (ECH).
+
 policy-DisableFeedbackCommands = Disable commands to send feedback from the Help menu (Submit Feedback and Report Deceptive Site).
 
-policy-DisableFirefoxAccounts = Disable { -fxaccount-brand-name } based services, including Sync.
+# This string is in the process of being deprecated in favor of policy-DisableAccounts.
+policy-DisableFirefoxAccounts1 = Disable account-based services, including sync.
 
 # Firefox Screenshots is the name of the feature, and should not be translated.
 policy-DisableFirefoxScreenshots = Disable the Firefox Screenshots feature.
@@ -220,6 +223,8 @@ policy-SSLVersionMin = Set the minimum SSL version.
 policy-StartDownloadsInTempDirectory = Force downloads to start off in a local, temporary location rather than the default download directory.
 
 policy-SupportMenu = Add a custom support menu item to the help menu.
+
+policy-TranslateEnabled = Enable or disable webpage translation.
 
 policy-UserMessaging = Don’t show certain messages to the user.
 

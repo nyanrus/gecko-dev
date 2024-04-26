@@ -9,6 +9,7 @@ browser.jar:
     content/browser/firefoxview/firefoxview.mjs
     content/browser/firefoxview/history.css
     content/browser/firefoxview/history.mjs
+    content/browser/firefoxview/HistoryController.mjs
     content/browser/firefoxview/opentabs.mjs
     content/browser/firefoxview/view-opentabs.css
     content/browser/firefoxview/syncedtabs.mjs
@@ -18,11 +19,15 @@ browser.jar:
     content/browser/firefoxview/fxview-empty-state.css
     content/browser/firefoxview/fxview-empty-state.mjs
     content/browser/firefoxview/helpers.mjs
+    content/browser/firefoxview/search-helpers.mjs
     content/browser/firefoxview/fxview-search-textbox.css
     content/browser/firefoxview/fxview-search-textbox.mjs
     content/browser/firefoxview/fxview-tab-list.css
     content/browser/firefoxview/fxview-tab-list.mjs
     content/browser/firefoxview/fxview-tab-row.css
+    content/browser/firefoxview/opentabs-tab-list.css
+    content/browser/firefoxview/opentabs-tab-list.mjs
+    content/browser/firefoxview/opentabs-tab-row.css
     content/browser/firefoxview/recentlyclosed.mjs
     content/browser/firefoxview/viewpage.mjs
     content/browser/firefoxview/history-empty.svg (content/history-empty.svg)

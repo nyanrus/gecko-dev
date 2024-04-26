@@ -448,13 +448,9 @@ NS_IMPL_ISUPPORTS0(AudioCallbackDriver::FallbackWrapper)
 
 /* static */
 already_AddRefed<TaskQueue> AudioCallbackDriver::CreateTaskQueue() {
-  RefPtr<SharedThreadPool> pool = CUBEB_TASK_THREAD;
-  const uint32_t kIdleThreadTimeoutMs = 2000;
-  pool->SetIdleThreadTimeout(PR_MillisecondsToInterval(kIdleThreadTimeoutMs));
-
-  RefPtr<TaskQueue> queue =
-      TaskQueue::Create(pool.forget(), "AudioCallbackDriver cubeb task queue");
-  return queue.forget();
+  return TaskQueue::Create(CubebUtils::GetCubebOperationThread(),
+                           "AudioCallbackDriver cubeb task queue")
+      .forget();
 }
 
 AudioCallbackDriver::AudioCallbackDriver(
@@ -482,15 +478,9 @@ AudioCallbackDriver::AudioCallbackDriver(
                        "Invalid output channel count");
   MOZ_ASSERT(mOutputChannelCount <= 8);
 
-  bool allowVoice = StaticPrefs::
-      media_getusermedia_microphone_prefer_voice_stream_with_processing_enabled();
-#ifdef MOZ_WIDGET_COCOA
-  // Using the VoiceProcessingIO audio unit on MacOS 12 causes crashes in
-  // OS code.
-  allowVoice = allowVoice && nsCocoaFeatures::macOSVersionMajor() != 12;
-#endif
-
-  if (aAudioInputType == AudioInputType::Voice && allowVoice) {
+  if (aAudioInputType == AudioInputType::Voice &&
+      StaticPrefs::
+          media_getusermedia_microphone_prefer_voice_stream_with_processing_enabled()) {
     LOG(LogLevel::Debug, ("VOICE."));
     mInputDevicePreference = CUBEB_DEVICE_PREF_VOICE;
     CubebUtils::SetInCommunication(true);

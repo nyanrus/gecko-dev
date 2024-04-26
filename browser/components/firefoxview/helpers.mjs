@@ -126,27 +126,6 @@ export function isSearchEnabled() {
 }
 
 /**
- * Escape special characters for regular expressions from a string.
- *
- * @param {string} string
- *   The string to sanitize.
- * @returns {string} The sanitized string.
- */
-export function escapeRegExp(string) {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
- * Search a tab list for items that match the given query.
- */
-export function searchTabList(query, tabList) {
-  const regex = RegExp(escapeRegExp(query), "i");
-  return tabList.filter(
-    ({ title, url }) => regex.test(title) || regex.test(url)
-  );
-}
-
-/**
  * Get or create a logger, whose log-level is controlled by a pref
  *
  * @param {string} loggerName - Creating named loggers helps differentiate log messages from different
@@ -172,4 +151,21 @@ export function escapeHtmlEntities(text) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+export function navigateToLink(e) {
+  let currentWindow =
+    e.target.ownerGlobal.browsingContext.embedderWindowGlobal.browsingContext
+      .window;
+  if (currentWindow.openTrustedLinkIn) {
+    let where = lazy.BrowserUtils.whereToOpenLink(
+      e.detail.originalEvent,
+      false,
+      true
+    );
+    if (where == "current") {
+      where = "tab";
+    }
+    currentWindow.openTrustedLinkIn(e.originalTarget.url, where);
+  }
 }

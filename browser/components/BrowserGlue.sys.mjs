@@ -27,9 +27,10 @@ ChromeUtils.defineESModuleGetters(lazy, {
   BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.sys.mjs",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   BuiltInThemes: "resource:///modules/BuiltInThemes.sys.mjs",
+  ContentRelevancyManager:
+    "resource://gre/modules/ContentRelevancyManager.sys.mjs",
   ContextualIdentityService:
     "resource://gre/modules/ContextualIdentityService.sys.mjs",
-  Corroborate: "resource://gre/modules/Corroborate.sys.mjs",
   DAPTelemetrySender: "resource://gre/modules/DAPTelemetrySender.sys.mjs",
   DeferredTask: "resource://gre/modules/DeferredTask.sys.mjs",
   Discovery: "resource:///modules/Discovery.sys.mjs",
@@ -80,8 +81,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   Sanitizer: "resource:///modules/Sanitizer.sys.mjs",
   SaveToPocket: "chrome://pocket/content/SaveToPocket.sys.mjs",
   ScreenshotsUtils: "resource:///modules/ScreenshotsUtils.sys.mjs",
-  SearchSERPDomainToCategoriesMap:
-    "resource:///modules/SearchSERPTelemetry.sys.mjs",
+  SearchSERPCategorization: "resource:///modules/SearchSERPTelemetry.sys.mjs",
   SearchSERPTelemetry: "resource:///modules/SearchSERPTelemetry.sys.mjs",
   SessionStartup: "resource:///modules/sessionstore/SessionStartup.sys.mjs",
   SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
@@ -124,11 +124,7 @@ XPCOMUtils.defineLazyServiceGetters(lazy, {
 ChromeUtils.defineLazyGetter(
   lazy,
   "accountsL10n",
-  () =>
-    new Localization(
-      ["browser/accounts.ftl", "toolkit/branding/accounts.ftl"],
-      true
-    )
+  () => new Localization(["browser/accounts.ftl"], true)
 );
 
 if (AppConstants.ENABLE_WEBDRIVER) {
@@ -223,6 +219,22 @@ let JSPROCESSACTORS = {
  * available at https://firefox-source-docs.mozilla.org/dom/ipc/jsactors.html
  */
 let JSWINDOWACTORS = {
+  Megalist: {
+    parent: {
+      esModuleURI: "resource://gre/actors/MegalistParent.sys.mjs",
+    },
+    child: {
+      esModuleURI: "resource://gre/actors/MegalistChild.sys.mjs",
+      events: {
+        DOMContentLoaded: {},
+      },
+    },
+    includeChrome: true,
+    matches: ["chrome://global/content/megalist/megalist.html"],
+    allFrames: true,
+    enablePreference: "browser.megalist.enabled",
+  },
+
   AboutLogins: {
     parent: {
       esModuleURI: "resource:///actors/AboutLoginsParent.sys.mjs",
@@ -1133,6 +1145,9 @@ BrowserGlue.prototype = {
       case "fxaccounts:commands:open-uri":
         this._onDisplaySyncURIs(subject);
         break;
+      case "fxaccounts:commands:close-uri":
+        this._onIncomingCloseTabCommand(subject);
+        break;
       case "session-save":
         this._setPrefToSaveSession(true);
         subject.QueryInterface(Ci.nsISupportsPRBool);
@@ -1300,6 +1315,7 @@ BrowserGlue.prototype = {
       "fxaccounts:verify_login",
       "fxaccounts:device_disconnected",
       "fxaccounts:commands:open-uri",
+      "fxaccounts:commands:close-uri",
       "session-save",
       "places-init-complete",
       "distribution-customization-complete",
@@ -1614,7 +1630,9 @@ BrowserGlue.prototype = {
           "unsignedAddonsDisabled.learnMore.accesskey"
         ),
         callback() {
-          win.BrowserOpenAddonsMgr("addons://list/extension?unsigned=true");
+          win.BrowserAddonUI.openAddonsMgr(
+            "addons://list/extension?unsigned=true"
+          );
         },
       },
     ];
@@ -2111,7 +2129,7 @@ BrowserGlue.prototype = {
 
       () => lazy.BrowserUsageTelemetry.uninit(),
       () => lazy.SearchSERPTelemetry.uninit(),
-      () => lazy.SearchSERPDomainToCategoriesMap.uninit(),
+      () => lazy.SearchSERPCategorization.uninit(),
       () => lazy.Interactions.uninit(),
       () => lazy.PageDataService.uninit(),
       () => lazy.PageThumbs.uninit(),
@@ -2341,7 +2359,7 @@ BrowserGlue.prototype = {
       _badgeIcon();
     }
 
-    lazy.RemoteSettings(STUDY_ADDON_COLLECTION_KEY).on("sync", async event => {
+    lazy.RemoteSettings(STUDY_ADDON_COLLECTION_KEY).on("sync", async () => {
       Services.prefs.setBoolPref(PREF_ION_NEW_STUDIES_AVAILABLE, true);
     });
 
@@ -2436,7 +2454,7 @@ BrowserGlue.prototype = {
     lazy.Sanitizer.onStartup();
     this._maybeShowRestoreSessionInfoBar();
     this._scheduleStartupIdleTasks();
-    this._lateTasksIdleObserver = (idleService, topic, data) => {
+    this._lateTasksIdleObserver = (idleService, topic) => {
       if (topic == "idle") {
         idleService.removeIdleObserver(
           this._lateTasksIdleObserver,
@@ -2662,7 +2680,19 @@ BrowserGlue.prototype = {
             AppConstants.platform == "win") &&
           Services.prefs.getBoolPref("browser.firefoxbridge.enabled", false),
         task: async () => {
-          await lazy.FirefoxBridgeExtensionUtils.ensureRegistered();
+          let profileService = Cc[
+            "@mozilla.org/toolkit/profile-service;1"
+          ].getService(Ci.nsIToolkitProfileService);
+          if (
+            profileService.defaultProfile &&
+            profileService.currentProfile == profileService.defaultProfile
+          ) {
+            await lazy.FirefoxBridgeExtensionUtils.ensureRegistered();
+          } else {
+            lazy.log.debug(
+              "FirefoxBridgeExtensionUtils failed to register due to non-default current profile."
+            );
+          }
         },
       },
 
@@ -2680,12 +2710,6 @@ BrowserGlue.prototype = {
         name: "ensurePrivateBrowsingShortcutExists",
         condition:
           AppConstants.platform == "win" &&
-          // Pref'ed off until Private Browsing window separation is enabled by default
-          // to avoid a situation where a user pins the Private Browsing shortcut to
-          // the Taskbar, which will end up launching into a different Taskbar icon.
-          lazy.NimbusFeatures.majorRelease2022.getVariable(
-            "feltPrivacyWindowSeparation"
-          ) &&
           // We don't want a shortcut if it's been disabled, eg: by enterprise policy.
           lazy.PrivateBrowsingUtils.enabled &&
           // Private Browsing shortcuts for packaged builds come with the package,
@@ -2907,7 +2931,7 @@ BrowserGlue.prototype = {
             let cfg = lazy.NimbusFeatures.gleanInternalSdk.getVariable(
               "gleanMetricConfiguration"
             );
-            Services.fog.setMetricsFeatureConfig(JSON.stringify(cfg));
+            Services.fog.applyServerKnobsConfig(JSON.stringify(cfg));
           });
 
           // Register Glean to listen for experiment updates releated to the
@@ -2916,7 +2940,7 @@ BrowserGlue.prototype = {
             let cfg = lazy.NimbusFeatures.glean.getVariable(
               "gleanMetricConfiguration"
             );
-            Services.fog.setMetricsFeatureConfig(JSON.stringify(cfg));
+            Services.fog.applyServerKnobsConfig(JSON.stringify(cfg));
           });
         },
       },
@@ -3058,11 +3082,9 @@ BrowserGlue.prototype = {
 
       {
         name: "DAPTelemetrySender.startup",
-        condition:
-          lazy.TelemetryUtils.isTelemetryEnabled &&
-          lazy.NimbusFeatures.dapTelemetry.getVariable("enabled"),
-        task: () => {
-          lazy.DAPTelemetrySender.startup();
+        condition: lazy.TelemetryUtils.isTelemetryEnabled,
+        task: async () => {
+          await lazy.DAPTelemetrySender.startup();
         },
       },
 
@@ -3082,9 +3104,16 @@ BrowserGlue.prototype = {
       },
 
       {
-        name: "SearchSERPDomainToCategoriesMap.init",
+        name: "SearchSERPCategorization.init",
         task: () => {
-          lazy.SearchSERPDomainToCategoriesMap.init().catch(console.error);
+          lazy.SearchSERPCategorization.init();
+        },
+      },
+
+      {
+        name: "ContentRelevancyManager.init",
+        task: () => {
+          lazy.ContentRelevancyManager.init();
         },
       },
 
@@ -3193,12 +3222,6 @@ BrowserGlue.prototype = {
         lazy.RemoteSecuritySettings.init();
       },
 
-      function CorroborateInit() {
-        if (Services.prefs.getBoolPref("corroborator.enabled", false)) {
-          lazy.Corroborate.init().catch(console.error);
-        }
-      },
-
       function BrowserUsageTelemetryReportProfileCount() {
         lazy.BrowserUsageTelemetry.reportProfileCount();
       },
@@ -3213,6 +3236,14 @@ BrowserGlue.prototype = {
 
       function reportInstallationTelemetry() {
         lazy.BrowserUsageTelemetry.reportInstallationTelemetry();
+      },
+
+      function trustObjectTelemetry() {
+        let certdb = Cc["@mozilla.org/security/x509certdb;1"].getService(
+          Ci.nsIX509CertDB
+        );
+        // countTrustObjects also logs the number of trust objects for telemetry purposes
+        certdb.countTrustObjects();
       },
     ];
 
@@ -3695,11 +3726,11 @@ BrowserGlue.prototype = {
 
   _onThisDeviceConnected() {
     const [title, body] = lazy.accountsL10n.formatValuesSync([
-      "account-connection-title",
+      "account-connection-title-2",
       "account-connection-connected",
     ]);
 
-    let clickCallback = (subject, topic, data) => {
+    let clickCallback = (subject, topic) => {
       if (topic != "alertclickcallback") {
         return;
       }
@@ -3740,19 +3771,13 @@ BrowserGlue.prototype = {
   _migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 143;
+    const UI_VERSION = 145;
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     if (!Services.prefs.prefHasUserValue("browser.migration.version")) {
       // This is a new profile, nothing to migrate.
       Services.prefs.setIntPref("browser.migration.version", UI_VERSION);
       this._isNewProfile = true;
-
-      if (AppConstants.platform == "win") {
-        // Ensure that the Firefox Bridge protocols are registered for the new profile.
-        // No-op if they are registered for the user or the local machine already.
-        lazy.FirefoxBridgeExtensionUtils.maybeRegisterFirefoxBridgeProtocols();
-      }
 
       return;
     }
@@ -4354,14 +4379,35 @@ BrowserGlue.prototype = {
     }
 
     if (currentUIVersion < 143) {
+      // Version 143 has been superseded by version 145 below.
+    }
+
+    if (currentUIVersion < 144) {
+      // TerminatorTelemetry was removed in bug 1879136. Before it was removed,
+      // the ShutdownDuration.json file would be written to disk at shutdown
+      // so that the next launch of the browser could read it in and send
+      // shutdown performance measurements.
+      //
+      // Unfortunately, this mechanism and its measurements were fairly
+      // unreliable, so they were removed.
+      for (const filename of [
+        "ShutdownDuration.json",
+        "ShutdownDuration.json.tmp",
+      ]) {
+        const filePath = PathUtils.join(PathUtils.profileDir, filename);
+        IOUtils.remove(filePath, { ignoreAbsent: true }).catch(console.error);
+      }
+    }
+
+    if (currentUIVersion < 145) {
       if (AppConstants.platform == "win") {
         // In Firefox 122, we enabled the firefox and firefox-private protocols.
         // We switched over to using firefox-bridge and firefox-private-bridge,
         // but we want to clean up the use of the other protocols.
-        lazy.FirefoxBridgeExtensionUtils.maybeDeleteBridgeProtocolRegistryEntries();
-
-        // Register the new firefox bridge related protocols now
-        lazy.FirefoxBridgeExtensionUtils.maybeRegisterFirefoxBridgeProtocols();
+        lazy.FirefoxBridgeExtensionUtils.maybeDeleteBridgeProtocolRegistryEntries(
+          lazy.FirefoxBridgeExtensionUtils.OLD_PUBLIC_PROTOCOL,
+          lazy.FirefoxBridgeExtensionUtils.OLD_PRIVATE_PROTOCOL
+        );
 
         // Clean up the old user prefs from FX 122
         Services.prefs.clearUserPref(
@@ -4370,10 +4416,23 @@ BrowserGlue.prototype = {
         Services.prefs.clearUserPref(
           "network.protocol-handler.external.firefox-private"
         );
+
+        // In Firefox 126, we switched over to using native messaging so the
+        // protocols are no longer necessary even in firefox-bridge and
+        // firefox-private-bridge form
+        lazy.FirefoxBridgeExtensionUtils.maybeDeleteBridgeProtocolRegistryEntries(
+          lazy.FirefoxBridgeExtensionUtils.PUBLIC_PROTOCOL,
+          lazy.FirefoxBridgeExtensionUtils.PRIVATE_PROTOCOL
+        );
+        Services.prefs.clearUserPref(
+          "network.protocol-handler.external.firefox-bridge"
+        );
+        Services.prefs.clearUserPref(
+          "network.protocol-handler.external.firefox-private-bridge"
+        );
         Services.prefs.clearUserPref("browser.shell.customProtocolsRegistered");
       }
     }
-
     // Update the migration version.
     Services.prefs.setIntPref("browser.migration.version", UI_VERSION);
   },
@@ -4462,14 +4521,6 @@ BrowserGlue.prototype = {
 
       // Check the default branch as enterprise policies can set prefs there.
       const defaultPrefs = Services.prefs.getDefaultBranch("");
-      if (
-        !defaultPrefs.getBoolPref(
-          "browser.messaging-system.whatsNewPanel.enabled",
-          true
-        )
-      ) {
-        return "no-whatsNew";
-      }
       if (!defaultPrefs.getBoolPref("browser.aboutwelcome.enabled", true)) {
         return "no-welcome";
       }
@@ -4477,10 +4528,7 @@ BrowserGlue.prototype = {
         return "disallow-postUpdate";
       }
 
-      const useMROnboarding =
-        lazy.NimbusFeatures.majorRelease2022.getVariable("onboarding");
       const showUpgradeDialog =
-        useMROnboarding ??
         lazy.NimbusFeatures.upgradeDialog.getVariable("enabled");
 
       return showUpgradeDialog ? "" : "disabled";
@@ -4712,7 +4760,7 @@ BrowserGlue.prototype = {
       }
       const title = await lazy.accountsL10n.formatValue(titleL10nId);
 
-      const clickCallback = (obsSubject, obsTopic, obsData) => {
+      const clickCallback = (obsSubject, obsTopic) => {
         if (obsTopic == "alertclickcallback") {
           win.gBrowser.selectedTab = firstTab;
         }
@@ -4736,6 +4784,32 @@ BrowserGlue.prototype = {
     }
   },
 
+  async _onIncomingCloseTabCommand(data) {
+    // The payload is wrapped weirdly because of how Sync does notifications.
+    const wrappedObj = data.wrappedJSObject.object;
+    let { urls } = wrappedObj[0];
+    let urisToClose = [];
+    urls.forEach(urlString => {
+      try {
+        urisToClose.push(Services.io.newURI(urlString));
+      } catch (ex) {
+        // The url was invalid so we ignore
+        console.error(ex);
+      }
+    });
+    for (let win of lazy.BrowserWindowTracker.orderedWindows) {
+      // Ensure we're operating on fully opened browser windows
+      if (!win.gBrowser) {
+        continue;
+      }
+      urisToClose = await win.gBrowser.closeTabsByURI(urisToClose);
+      // If we've successfully closed all the tabs, break early
+      if (!urisToClose.length) {
+        break;
+      }
+    }
+  },
+
   async _onVerifyLoginNotification({ body, title, url }) {
     let tab;
     let imageURL;
@@ -4751,7 +4825,7 @@ BrowserGlue.prototype = {
       tab = win.gBrowser.addWebTab(url);
     }
     tab.attention = true;
-    let clickCallback = (subject, topic, data) => {
+    let clickCallback = (subject, topic) => {
       if (topic != "alertclickcallback") {
         return;
       }
@@ -4774,13 +4848,13 @@ BrowserGlue.prototype = {
 
   _onDeviceConnected(deviceName) {
     const [title, body] = lazy.accountsL10n.formatValuesSync([
-      { id: "account-connection-title" },
+      { id: "account-connection-title-2" },
       deviceName
         ? { id: "account-connection-connected-with", args: { deviceName } }
         : { id: "account-connection-connected-with-noname" },
     ]);
 
-    let clickCallback = async (subject, topic, data) => {
+    let clickCallback = async (subject, topic) => {
       if (topic != "alertclickcallback") {
         return;
       }
@@ -4811,11 +4885,11 @@ BrowserGlue.prototype = {
 
   _onDeviceDisconnected() {
     const [title, body] = lazy.accountsL10n.formatValuesSync([
-      "account-connection-title",
+      "account-connection-title-2",
       "account-connection-disconnected",
     ]);
 
-    let clickCallback = (subject, topic, data) => {
+    let clickCallback = (subject, topic) => {
       if (topic != "alertclickcallback") {
         return;
       }
@@ -4870,7 +4944,7 @@ BrowserGlue.prototype = {
     const TOGGLE_ENABLED_PREF =
       "media.videocontrols.picture-in-picture.video-toggle.enabled";
 
-    const observe = (subject, topic, data) => {
+    const observe = (subject, topic) => {
       const enabled = Services.prefs.getBoolPref(TOGGLE_ENABLED_PREF, false);
       Services.telemetry.scalarSet("pictureinpicture.toggle_enabled", enabled);
 
@@ -5694,7 +5768,9 @@ export var AboutHomeStartupCache = {
 
     this.setDeferredResult(this.CACHE_RESULT_SCALARS.UNSET);
 
-    this._enabled = !!lazy.NimbusFeatures.abouthomecache.getVariable("enabled");
+    this._enabled = Services.prefs.getBoolPref(
+      "browser.startup.homepage.abouthome_cache.enabled"
+    );
 
     if (!this._enabled) {
       this.recordResult(this.CACHE_RESULT_SCALARS.DISABLED);
@@ -6475,11 +6551,11 @@ export var AboutHomeStartupCache = {
 
   /** nsICacheEntryOpenCallback **/
 
-  onCacheEntryCheck(aEntry) {
+  onCacheEntryCheck() {
     return Ci.nsICacheEntryOpenCallback.ENTRY_WANTED;
   },
 
-  onCacheEntryAvailable(aEntry, aNew, aResult) {
+  onCacheEntryAvailable(aEntry) {
     this.log.trace("Cache entry is available.");
 
     this._cacheEntry = aEntry;

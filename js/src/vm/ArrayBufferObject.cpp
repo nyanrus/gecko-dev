@@ -207,6 +207,7 @@ void* js::MapBufferMemory(wasm::IndexType t, size_t mappedSize,
   void* data = nullptr;
   if (int err = posix_memalign(&data, gc::SystemPageSize(), mappedSize)) {
     MOZ_ASSERT(err == ENOMEM);
+    (void)err;
     return nullptr;
   }
   MOZ_ASSERT(data);
@@ -2578,8 +2579,15 @@ size_t ArrayBufferObject::objectMoved(JSObject* obj, JSObject* old) {
   auto& dst = obj->as<ArrayBufferType>();
   const auto& src = old->as<ArrayBufferType>();
 
-  MOZ_ASSERT(
-      !obj->runtimeFromMainThread()->gc.nursery().isInside(src.dataPointer()));
+#ifdef DEBUG
+  // Check the data pointer is not inside the nursery, but take account of the
+  // fact that inline data pointers for zero length buffers can point to the end
+  // of a chunk which can abut the start of the nursery.
+  if (src.byteLength() != 0 || (uintptr_t(src.dataPointer()) & gc::ChunkMask)) {
+    Nursery& nursery = obj->runtimeFromMainThread()->gc.nursery();
+    MOZ_ASSERT(!nursery.isInside(src.dataPointer()));
+  }
+#endif
 
   // Fix up possible inline data pointer.
   if (src.hasInlineData()) {
@@ -2830,7 +2838,7 @@ bool InnerViewTable::addView(JSContext* cx, ArrayBufferObject* buffer,
   if (isNurseryView && !hadNurseryViews && nurseryKeysValid) {
 #ifdef DEBUG
     if (nurseryKeys.length() < 100) {
-      for (auto* key : nurseryKeys) {
+      for (const auto& key : nurseryKeys) {
         MOZ_ASSERT(key != buffer);
       }
     }
@@ -2859,31 +2867,53 @@ void InnerViewTable::removeViews(ArrayBufferObject* buffer) {
   map.remove(ptr);
 }
 
-bool InnerViewTable::traceWeak(JSTracer* trc) { return map.traceWeak(trc); }
+bool InnerViewTable::traceWeak(JSTracer* trc) {
+  nurseryKeys.traceWeak(trc);
+  map.traceWeak(trc);
+  return true;
+}
 
 void InnerViewTable::sweepAfterMinorGC(JSTracer* trc) {
   MOZ_ASSERT(needsSweepAfterMinorGC());
 
-  if (nurseryKeysValid) {
-    for (size_t i = 0; i < nurseryKeys.length(); i++) {
-      ArrayBufferObject* buffer = nurseryKeys[i];
+  NurseryKeysVector keys;
+  bool valid = true;
+  std::swap(nurseryKeys, keys);
+  std::swap(nurseryKeysValid, valid);
+
+  // Use nursery keys vector if possible.
+  if (valid) {
+    for (ArrayBufferObject* buffer : keys) {
       MOZ_ASSERT(!gc::IsInsideNursery(buffer));
       auto ptr = map.lookup(buffer);
-      if (ptr && !ptr->value().sweepAfterMinorGC(trc)) {
+      if (ptr && !sweepViewsAfterMinorGC(trc, buffer, ptr->value())) {
         map.remove(ptr);
       }
     }
-  } else {
-    for (ArrayBufferViewMap::Enum e(map); !e.empty(); e.popFront()) {
-      MOZ_ASSERT(!gc::IsInsideNursery(e.front().key()));
-      if (!e.front().value().sweepAfterMinorGC(trc)) {
-        e.removeFront();
-      }
-    }
+    return;
   }
 
-  nurseryKeys.clear();
-  nurseryKeysValid = true;
+  // Otherwise look at every map entry.
+  for (ArrayBufferViewMap::Enum e(map); !e.empty(); e.popFront()) {
+    MOZ_ASSERT(!gc::IsInsideNursery(e.front().key()));
+    if (!sweepViewsAfterMinorGC(trc, e.front().key(), e.front().value())) {
+      e.removeFront();
+    }
+  }
+}
+
+bool InnerViewTable::sweepViewsAfterMinorGC(JSTracer* trc,
+                                            ArrayBufferObject* buffer,
+                                            Views& views) {
+  if (!views.sweepAfterMinorGC(trc)) {
+    return false;  // No more views.
+  }
+
+  if (views.hasNurseryViews() && !nurseryKeys.append(buffer)) {
+    nurseryKeysValid = false;
+  }
+
+  return true;
 }
 
 size_t InnerViewTable::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) {

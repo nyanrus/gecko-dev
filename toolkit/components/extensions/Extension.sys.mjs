@@ -31,7 +31,9 @@ import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 import { ExtensionCommon } from "resource://gre/modules/ExtensionCommon.sys.mjs";
 import { ExtensionParent } from "resource://gre/modules/ExtensionParent.sys.mjs";
 import { ExtensionUtils } from "resource://gre/modules/ExtensionUtils.sys.mjs";
+import { Log } from "resource://gre/modules/Log.sys.mjs";
 
+/** @type {Lazy} */
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
@@ -54,7 +56,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
   ExtensionTelemetry: "resource://gre/modules/ExtensionTelemetry.sys.mjs",
   LightweightThemeManager:
     "resource://gre/modules/LightweightThemeManager.sys.mjs",
-  Log: "resource://gre/modules/Log.sys.mjs",
   NetUtil: "resource://gre/modules/NetUtil.sys.mjs",
   SITEPERMS_ADDON_TYPE:
     "resource://gre/modules/addons/siteperms-addon-utils.sys.mjs",
@@ -508,14 +509,36 @@ var ExtensionAddonObserver = {
   },
 
   onUninstalled(addon) {
+    this.clearOnUninstall(addon.id);
+  },
+
+  /**
+   * Clears persistent state from the add-on post install.
+   *
+   * @param {string} addonId The ID of the addon that has been uninstalled.
+   */
+  clearOnUninstall(addonId) {
+    const tasks = [];
+    function addShutdownBlocker(name, promise) {
+      lazy.AsyncShutdown.profileChangeTeardown.addBlocker(name, promise);
+      tasks.push({ name, promise });
+    }
+    function notifyUninstallTaskObservers() {
+      Management.emit("cleanupAfterUninstall", addonId, tasks);
+    }
+
     // Cleanup anything that is used by non-extension addon types
     // since only extensions have uuid's.
-    lazy.ExtensionPermissions.removeAll(addon.id);
+    addShutdownBlocker(
+      `Clear ExtensionPermissions for ${addonId}`,
+      lazy.ExtensionPermissions.removeAll(addonId)
+    );
 
-    lazy.QuarantinedDomains.clearUserPref(addon.id);
+    lazy.QuarantinedDomains.clearUserPref(addonId);
 
-    let uuid = UUIDMap.get(addon.id, false);
+    let uuid = UUIDMap.get(addonId, false);
     if (!uuid) {
+      notifyUninstallTaskObservers();
       return;
     }
 
@@ -526,8 +549,8 @@ var ExtensionAddonObserver = {
     );
 
     // Clear all cached resources (e.g. CSS and images);
-    lazy.AsyncShutdown.profileChangeTeardown.addBlocker(
-      `Clear cache for ${addon.id}`,
+    addShutdownBlocker(
+      `Clear cache for ${addonId}`,
       clearCacheForExtensionPrincipal(principal, /* clearAll */ true)
     );
 
@@ -548,38 +571,38 @@ var ExtensionAddonObserver = {
     // down because is being uninstalled) and then cleared from
     // the persisted serviceworker registration on the next
     // startup.
-    lazy.AsyncShutdown.profileChangeTeardown.addBlocker(
-      `Clear ServiceWorkers for ${addon.id}`,
+    addShutdownBlocker(
+      `Clear ServiceWorkers for ${addonId}`,
       lazy.ServiceWorkerCleanUp.removeFromPrincipal(principal)
     );
 
     // Clear the persisted dynamic content scripts created with the scripting
     // API (if any).
-    lazy.AsyncShutdown.profileChangeTeardown.addBlocker(
-      `Clear scripting store for ${addon.id}`,
-      lazy.ExtensionScriptingStore.clearOnUninstall(addon.id)
+    addShutdownBlocker(
+      `Clear scripting store for ${addonId}`,
+      lazy.ExtensionScriptingStore.clearOnUninstall(addonId)
     );
 
     // Clear the DNR API's rules data persisted on disk (if any).
-    lazy.AsyncShutdown.profileChangeTeardown.addBlocker(
-      `Clear declarativeNetRequest store for ${addon.id}`,
+    addShutdownBlocker(
+      `Clear declarativeNetRequest store for ${addonId}`,
       lazy.ExtensionDNRStore.clearOnUninstall(uuid)
     );
 
     if (!Services.prefs.getBoolPref(LEAVE_STORAGE_PREF, false)) {
       // Clear browser.storage.local backends.
-      lazy.AsyncShutdown.profileChangeTeardown.addBlocker(
-        `Clear Extension Storage ${addon.id} (File Backend)`,
-        lazy.ExtensionStorage.clear(addon.id, { shouldNotifyListeners: false })
+      addShutdownBlocker(
+        `Clear Extension Storage ${addonId} (File Backend)`,
+        lazy.ExtensionStorage.clear(addonId, { shouldNotifyListeners: false })
       );
 
       // Clear browser.storage.sync rust-based backend.
       // (storage.sync clearOnUninstall will resolve and log an error on the
       // browser console in case of unexpected failures).
       if (!lazy.storageSyncOldKintoBackend) {
-        lazy.AsyncShutdown.profileChangeTeardown.addBlocker(
-          `Clear Extension StorageSync ${addon.id}`,
-          lazy.extensionStorageSync.clearOnUninstall(addon.id)
+        addShutdownBlocker(
+          `Clear Extension StorageSync ${addonId}`,
+          lazy.extensionStorageSync.clearOnUninstall(addonId)
         );
       }
 
@@ -594,7 +617,7 @@ var ExtensionAddonObserver = {
         });
       Services.qms.clearStoragesForPrincipal(storagePrincipal);
 
-      lazy.ExtensionStorageIDB.clearMigratedExtensionPref(addon.id);
+      lazy.ExtensionStorageIDB.clearMigratedExtensionPref(addonId);
 
       // If LSNG is not enabled, we need to clear localStorage explicitly using
       // the old API.
@@ -631,8 +654,10 @@ var ExtensionAddonObserver = {
 
     if (!Services.prefs.getBoolPref(LEAVE_UUID_PREF, false)) {
       // Clear the entry in the UUID map
-      UUIDMap.remove(addon.id);
+      UUIDMap.remove(addonId);
     }
+
+    notifyUninstallTaskObservers();
   },
 
   onPropertyChanged(addon, properties) {
@@ -684,14 +709,13 @@ export var ExtensionProcessCrashObserver = {
   // `processCrashTimeframe` milliseconds.
   lastCrashTimestamps: [],
 
+  logger: Log.repository.getLogger("addons.process-crash-observer"),
+
   init() {
     if (!this.initialized) {
       Services.obs.addObserver(this, "ipc:content-created");
       Services.obs.addObserver(this, "process-type-set");
       Services.obs.addObserver(this, "ipc:content-shutdown");
-      this.logger = lazy.Log.repository.getLogger(
-        "addons.process-crash-observer"
-      );
       if (this._isAndroid) {
         Services.obs.addObserver(this, "geckoview-initial-foreground");
         Services.obs.addObserver(this, "application-foreground");
@@ -948,7 +972,7 @@ export class ExtensionData {
 
   get logger() {
     let id = this.id || "<unknown>";
-    return lazy.Log.repository.getLogger(LOGGER_ID_BASE + id);
+    return Log.repository.getLogger(LOGGER_ID_BASE + id);
   }
 
   /**
@@ -1118,6 +1142,24 @@ export class ExtensionData {
 
   get restrictSchemes() {
     return !(this.isPrivileged && this.hasPermission("mozillaAddons"));
+  }
+
+  get optionsPageProperties() {
+    let page = this.manifest.options_ui?.page ?? this.manifest.options_page;
+    if (!page) {
+      return null;
+    }
+    return {
+      page,
+      open_in_tab: this.manifest.options_ui
+        ? this.manifest.options_ui.open_in_tab ?? false
+        : true,
+      // `options_ui.browser_style` is assigned the proper default value
+      // (true for MV2 and false for MV3 when not explicitly set),
+      // in `#parseBrowserStyleInManifest` (called when we are loading
+      // and parse manifest data from the `parseManifest` method).
+      browser_style: this.manifest.options_ui?.browser_style ?? false,
+    };
   }
 
   /**
@@ -1658,6 +1700,8 @@ export class ExtensionData {
       );
     }
 
+    // manifest.options_page opens the extension page in a new tab
+    // and so we will not need to special handling browser_style.
     if (manifest.options_ui) {
       if (manifest.options_ui.open_in_tab) {
         // browser_style:true has no effect when open_in_tab is true.
@@ -2748,10 +2792,10 @@ class DictionaryBootstrapScope extends BootstrapScope {
   install() {}
   uninstall() {}
 
-  startup(data, reason) {
+  startup(data) {
     // eslint-disable-next-line no-use-before-define
     this.dictionary = new Dictionary(data);
-    return this.dictionary.startup(BootstrapScope.BOOTSTRAP_REASON_MAP[reason]);
+    return this.dictionary.startup();
   }
 
   async shutdown(data, reason) {
@@ -2765,10 +2809,10 @@ class LangpackBootstrapScope extends BootstrapScope {
   uninstall() {}
   async update() {}
 
-  startup(data, reason) {
+  startup(data) {
     // eslint-disable-next-line no-use-before-define
     this.langpack = new Langpack(data);
-    return this.langpack.startup(BootstrapScope.BOOTSTRAP_REASON_MAP[reason]);
+    return this.langpack.startup();
   }
 
   async shutdown(data, reason) {
@@ -2782,12 +2826,10 @@ class SitePermissionBootstrapScope extends BootstrapScope {
   install() {}
   uninstall() {}
 
-  startup(data, reason) {
+  startup(data) {
     // eslint-disable-next-line no-use-before-define
     this.sitepermission = new SitePermission(data);
-    return this.sitepermission.startup(
-      BootstrapScope.BOOTSTRAP_REASON_MAP[reason]
-    );
+    return this.sitepermission.startup();
   }
 
   async shutdown(data, reason) {
@@ -2809,6 +2851,15 @@ let pendingExtensions = new Map();
 export class Extension extends ExtensionData {
   /** @type {Map<string, Map<string, any>>} */
   persistentListeners;
+
+  /** @type {import("ExtensionShortcuts.sys.mjs").ExtensionShortcuts} */
+  shortcuts;
+
+  /** @type {TabManagerBase} */
+  tabManager;
+
+  /** @type {(options?: { ignoreDevToolsAttached?: boolean, disableResetIdleForTest?: boolean }) => Promise} */
+  terminateBackground;
 
   constructor(addonData, startupReason, updateReason) {
     super(addonData.resourceURI, addonData.isPrivileged);
@@ -3203,9 +3254,11 @@ export class Extension extends ExtensionData {
     };
   }
 
-  // Extended serialized data which is only needed in the extensions process,
-  // and is never deserialized in web content processes.
-  // Keep in sync with BrowserExtensionContent in ExtensionChild.sys.mjs
+  /**
+   * Extended serialized data which is only needed in the extensions process,
+   * and is never deserialized in web content processes.
+   * Keep in sync with @see {ExtensionChild}.
+   */
   serializeExtended() {
     return {
       backgroundScripts: this.backgroundScripts,
@@ -3461,7 +3514,7 @@ export class Extension extends ExtensionData {
       ignoreQuarantine: this.ignoreQuarantine,
       temporarilyInstalled: this.temporarilyInstalled,
       allowedOrigins: new MatchPatternSet([]),
-      localizeCallback() {},
+      localizeCallback: () => "",
       readyPromise,
     });
 

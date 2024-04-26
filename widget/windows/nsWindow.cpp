@@ -78,6 +78,7 @@
 #include <limits>
 
 #include "mozilla/widget/WinMessages.h"
+#include "nsLookAndFeel.h"
 #include "nsWindow.h"
 #include "nsWindowTaskbarConcealer.h"
 #include "nsAppRunner.h"
@@ -165,7 +166,6 @@
 #include "mozilla/StaticPrefs_ui.h"
 #include "mozilla/StaticPrefs_widget.h"
 #include "nsNativeAppSupportWin.h"
-#include "mozilla/browser/NimbusFeatures.h"
 
 #include "nsIGfxInfo.h"
 #include "nsUXThemeConstants.h"
@@ -181,6 +181,7 @@
 #  endif
 #  include "mozilla/a11y/Compatibility.h"
 #  include "oleidl.h"
+#  include <uiautomation.h>
 #  include <winuser.h>
 #  include "nsAccessibilityService.h"
 #  include "mozilla/a11y/DocAccessible.h"
@@ -987,13 +988,11 @@ nsresult nsWindow::Create(nsIWidget* aParent, nsNativeWidget aNativeParent,
   }
 
   if (aInitData->mIsPrivate) {
-    if (NimbusFeatures::GetBool("majorRelease2022"_ns,
-                                "feltPrivacyWindowSeparation"_ns, true) &&
-        // Although permanent Private Browsing mode is indeed Private Browsing,
-        // we choose to make it look like regular Firefox in terms of the icon
-        // it uses (which also means we shouldn't use the Private Browsing
-        // AUMID).
-        !StaticPrefs::browser_privatebrowsing_autostart()) {
+    // Although permanent Private Browsing mode is indeed Private Browsing,
+    // we choose to make it look like regular Firefox in terms of the icon
+    // it uses (which also means we shouldn't use the Private Browsing
+    // AUMID).
+    if (!StaticPrefs::browser_privatebrowsing_autostart()) {
       RefPtr<IPropertyStore> pPropStore;
       if (!FAILED(SHGetPropertyStoreForWindow(mWnd, IID_IPropertyStore,
                                               getter_AddRefs(pPropStore)))) {
@@ -1243,10 +1242,47 @@ const wchar_t* nsWindow::ChooseWindowClass(WindowType aWindowType) {
  *
  **************************************************************/
 
+const DWORD kTitlebarItemsWindowStyles =
+    WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+const DWORD kAllBorderStyles =
+    kTitlebarItemsWindowStyles | WS_THICKFRAME | WS_DLGFRAME;
+
+static DWORD WindowStylesRemovedForBorderStyle(BorderStyle aStyle) {
+  if (aStyle == BorderStyle::Default || aStyle == BorderStyle::All) {
+    return 0;
+  }
+  if (aStyle == BorderStyle::None) {
+    return kAllBorderStyles;
+  }
+  DWORD toRemove = 0;
+  if (!(aStyle & BorderStyle::Border)) {
+    toRemove |= WS_BORDER;
+  }
+  if (!(aStyle & BorderStyle::Title)) {
+    toRemove |= WS_DLGFRAME;
+  }
+  if (!(aStyle & (BorderStyle::Menu | BorderStyle::Close))) {
+    // Looks like getting rid of the system menu also does away with the close
+    // box. So, we only get rid of the system menu and the close box if you
+    // want neither. How does the Windows "Dialog" window class get just
+    // closebox and no sysmenu? Who knows.
+    toRemove |= WS_SYSMENU;
+  }
+  if (!(aStyle & BorderStyle::ResizeH)) {
+    toRemove |= WS_THICKFRAME;
+  }
+  if (!(aStyle & BorderStyle::Minimize)) {
+    toRemove |= WS_MINIMIZEBOX;
+  }
+  if (!(aStyle & BorderStyle::Maximize)) {
+    toRemove |= WS_MAXIMIZEBOX;
+  }
+  return toRemove;
+}
+
 // Return nsWindow styles
 DWORD nsWindow::WindowStyle() {
   DWORD style;
-
   switch (mWindowType) {
     case WindowType::Child:
       style = WS_OVERLAPPED;
@@ -1255,12 +1291,13 @@ DWORD nsWindow::WindowStyle() {
     case WindowType::Dialog:
       style = WS_OVERLAPPED | WS_BORDER | WS_DLGFRAME | WS_SYSMENU | DS_3DLOOK |
               DS_MODALFRAME | WS_CLIPCHILDREN;
-      if (mBorderStyle != BorderStyle::Default)
+      if (mBorderStyle != BorderStyle::Default) {
         style |= WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+      }
       break;
 
     case WindowType::Popup:
-      style = WS_POPUP | WS_OVERLAPPED;
+      style = WS_OVERLAPPED | WS_POPUP;
       break;
 
     default:
@@ -1269,48 +1306,12 @@ DWORD nsWindow::WindowStyle() {
 
     case WindowType::TopLevel:
     case WindowType::Invisible:
-      style = WS_OVERLAPPED | WS_BORDER | WS_DLGFRAME | WS_SYSMENU |
-              WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN;
+      style = WS_OVERLAPPED | WS_CLIPCHILDREN | WS_DLGFRAME | WS_BORDER |
+              WS_THICKFRAME | kTitlebarItemsWindowStyles;
       break;
   }
 
-  if (mBorderStyle != BorderStyle::Default &&
-      mBorderStyle != BorderStyle::All) {
-    if (mBorderStyle == BorderStyle::None ||
-        !(mBorderStyle & BorderStyle::Border))
-      style &= ~WS_BORDER;
-
-    if (mBorderStyle == BorderStyle::None ||
-        !(mBorderStyle & BorderStyle::Title)) {
-      style &= ~WS_DLGFRAME;
-    }
-
-    if (mBorderStyle == BorderStyle::None ||
-        !(mBorderStyle & BorderStyle::Close))
-      style &= ~0;
-    // XXX The close box can only be removed by changing the window class,
-    // as far as I know   --- roc+moz@cs.cmu.edu
-
-    if (mBorderStyle == BorderStyle::None ||
-        !(mBorderStyle & (BorderStyle::Menu | BorderStyle::Close)))
-      style &= ~WS_SYSMENU;
-    // Looks like getting rid of the system menu also does away with the
-    // close box. So, we only get rid of the system menu if you want neither it
-    // nor the close box. How does the Windows "Dialog" window class get just
-    // closebox and no sysmenu? Who knows.
-
-    if (mBorderStyle == BorderStyle::None ||
-        !(mBorderStyle & BorderStyle::ResizeH))
-      style &= ~WS_THICKFRAME;
-
-    if (mBorderStyle == BorderStyle::None ||
-        !(mBorderStyle & BorderStyle::Minimize))
-      style &= ~WS_MINIMIZEBOX;
-
-    if (mBorderStyle == BorderStyle::None ||
-        !(mBorderStyle & BorderStyle::Maximize))
-      style &= ~WS_MAXIMIZEBOX;
-  }
+  style &= ~WindowStylesRemovedForBorderStyle(mBorderStyle);
 
   if (mIsChildWindow) {
     style |= WS_CLIPCHILDREN;
@@ -1335,8 +1336,6 @@ DWORD nsWindow::WindowExStyle() {
       }
       return extendedStyle;
     }
-    case WindowType::Sheet:
-      MOZ_FALLTHROUGH_ASSERT("Sheets are macOS specific");
     case WindowType::Dialog:
     case WindowType::TopLevel:
     case WindowType::Invisible:
@@ -1582,13 +1581,6 @@ void nsWindow::Show(bool bState) {
   // Set the status now so that anyone asking during ShowWindow or
   // SetWindowPos would get the correct answer.
   mIsVisible = bState;
-
-  // We may have cached an out of date visible state. This can happen
-  // when session restore sets the full screen mode.
-  if (mIsVisible)
-    mOldStyle |= WS_VISIBLE;
-  else
-    mOldStyle &= ~WS_VISIBLE;
 
   if (mWnd) {
     if (bState) {
@@ -2477,46 +2469,6 @@ void nsWindow::ResetLayout() {
   Invalidate();
 }
 
-// Internally track the caption status via a window property. Required
-// due to our internal handling of WM_NCACTIVATE when custom client
-// margins are set.
-static const wchar_t kManageWindowInfoProperty[] = L"ManageWindowInfoProperty";
-typedef BOOL(WINAPI* GetWindowInfoPtr)(HWND hwnd, PWINDOWINFO pwi);
-static WindowsDllInterceptor::FuncHookType<GetWindowInfoPtr>
-    sGetWindowInfoPtrStub;
-
-BOOL WINAPI GetWindowInfoHook(HWND hWnd, PWINDOWINFO pwi) {
-  if (!sGetWindowInfoPtrStub) {
-    NS_ASSERTION(FALSE, "Something is horribly wrong in GetWindowInfoHook!");
-    return FALSE;
-  }
-  int windowStatus =
-      reinterpret_cast<LONG_PTR>(GetPropW(hWnd, kManageWindowInfoProperty));
-  // No property set, return the default data.
-  if (!windowStatus) return sGetWindowInfoPtrStub(hWnd, pwi);
-  // Call GetWindowInfo and update dwWindowStatus with our
-  // internally tracked value.
-  BOOL result = sGetWindowInfoPtrStub(hWnd, pwi);
-  if (result && pwi)
-    pwi->dwWindowStatus = (windowStatus == 1 ? 0 : WS_ACTIVECAPTION);
-  return result;
-}
-
-void nsWindow::UpdateGetWindowInfoCaptionStatus(bool aActiveCaption) {
-  if (!mWnd) return;
-
-  sUser32Intercept.Init("user32.dll");
-  sGetWindowInfoPtrStub.Set(sUser32Intercept, "GetWindowInfo",
-                            &GetWindowInfoHook);
-  if (!sGetWindowInfoPtrStub) {
-    return;
-  }
-
-  // Update our internally tracked caption status
-  SetPropW(mWnd, kManageWindowInfoProperty,
-           reinterpret_cast<HANDLE>(static_cast<INT_PTR>(aActiveCaption) + 1));
-}
-
 #define DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 19
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
 
@@ -2709,6 +2661,8 @@ bool nsWindow::UpdateNonClientMargins(bool aReflowWindow) {
     mNonClientOffset = NormalWindowNonClientOffset();
   }
 
+  UpdateOpaqueRegionInternal();
+
   if (aReflowWindow) {
     // Force a reflow of content based on the new client
     // dimensions.
@@ -2719,8 +2673,9 @@ bool nsWindow::UpdateNonClientMargins(bool aReflowWindow) {
 }
 
 nsresult nsWindow::SetNonClientMargins(const LayoutDeviceIntMargin& margins) {
-  if (!mIsTopWidgetWindow || mBorderStyle == BorderStyle::None)
+  if (!mIsTopWidgetWindow || mBorderStyle == BorderStyle::None) {
     return NS_ERROR_INVALID_ARG;
+  }
 
   if (mHideChrome) {
     mFutureMarginsOnceChromeShows = margins;
@@ -2737,19 +2692,13 @@ nsresult nsWindow::SetNonClientMargins(const LayoutDeviceIntMargin& margins) {
     // Force a reflow of content based on the new client
     // dimensions.
     ResetLayout();
-
-    int windowStatus =
-        reinterpret_cast<LONG_PTR>(GetPropW(mWnd, kManageWindowInfoProperty));
-    if (windowStatus) {
-      ::SendMessageW(mWnd, WM_NCACTIVATE, 1 != windowStatus, 0);
-    }
-
     return NS_OK;
   }
 
   if (margins.top < -1 || margins.bottom < -1 || margins.left < -1 ||
-      margins.right < -1)
+      margins.right < -1) {
     return NS_ERROR_INVALID_ARG;
+  }
 
   mNonClientMargins = margins;
   mCustomNonClient = true;
@@ -3063,34 +3012,85 @@ void nsWindow::HideWindowChrome(bool aShouldHide) {
 
   if (mHideChrome == aShouldHide) return;
 
-  DWORD_PTR style, exStyle;
-  mHideChrome = aShouldHide;
-  if (aShouldHide) {
-    DWORD_PTR tempStyle = ::GetWindowLongPtrW(hwnd, GWL_STYLE);
-    DWORD_PTR tempExStyle = ::GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-
-    style = tempStyle & ~(WS_CAPTION | WS_THICKFRAME);
-    exStyle = tempExStyle & ~(WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE |
-                              WS_EX_CLIENTEDGE | WS_EX_STATICEDGE);
-
-    mOldStyle = tempStyle;
-    mOldExStyle = tempExStyle;
-  } else {
-    if (!mOldStyle || !mOldExStyle) {
-      mOldStyle = ::GetWindowLongPtrW(hwnd, GWL_STYLE);
-      mOldExStyle = ::GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+  // Data manipulation: styles + ex-styles, and bitmasking operations thereupon.
+  struct Styles {
+    LONG_PTR style, ex;
+    constexpr Styles operator|(Styles const& that) const {
+      return Styles{.style = style | that.style, .ex = ex | that.ex};
+    }
+    constexpr Styles operator&(Styles const& that) const {
+      return Styles{.style = style & that.style, .ex = ex & that.ex};
+    }
+    constexpr Styles operator~() const {
+      return Styles{.style = ~style, .ex = ~ex};
     }
 
-    style = mOldStyle;
-    exStyle = mOldExStyle;
+    // Compute a style-set which matches `zero` where the bits of `this` are 0
+    // and `one` where the bits of `this` are 1.
+    constexpr Styles merge(Styles zero, Styles one) const {
+      Styles const& mask = *this;
+      return (~mask & zero) | (mask & one);
+    }
+
+    // The dual of `merge`, above: returns a pair [zero, one] satisfying
+    // `a.merge(a.split(b)...) == b`. (Or its equivalent in valid C++.)
+    constexpr std::tuple<Styles, Styles> split(Styles data) const {
+      Styles const& mask = *this;
+      return {~mask & data, mask & data};
+    }
+  };
+
+  // Get styles from an HWND.
+  constexpr auto const GetStyles = [](HWND hwnd) {
+    return Styles{.style = ::GetWindowLongPtrW(hwnd, GWL_STYLE),
+                  .ex = ::GetWindowLongPtrW(hwnd, GWL_EXSTYLE)};
+  };
+  constexpr auto const SetStyles = [](HWND hwnd, Styles styles) {
+    VERIFY_WINDOW_STYLE(styles.style);
+    ::SetWindowLongPtrW(hwnd, GWL_STYLE, styles.style);
+    ::SetWindowLongPtrW(hwnd, GWL_EXSTYLE, styles.ex);
+  };
+
+  // Get styles from *this.
+  auto const GetCachedStyles = [&]() {
+    return mOldStyles.map([](auto const& m) {
+      return Styles{.style = m.style, .ex = m.exStyle};
+    });
+  };
+  auto const SetCachedStyles = [&](Styles styles) {
+    using WStyles = nsWindow::WindowStyles;
+    mOldStyles = Some(WStyles{.style = styles.style, .exStyle = styles.ex});
+  };
+
+  // The mask describing the "chrome" which this function is supposed to remove
+  // (or restore, as the case may be). Other style-flags will be left untouched.
+  constexpr static const Styles kChromeMask{
+      .style = WS_CAPTION | WS_THICKFRAME,
+      .ex = WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE |
+            WS_EX_STATICEDGE};
+
+  // The desired style-flagset for fullscreen windows. (This happens to be all
+  // zeroes, but we don't need to rely on that.)
+  constexpr static const Styles kFullscreenChrome{.style = 0, .ex = 0};
+
+  auto const [chromeless, currentChrome] = kChromeMask.split(GetStyles(hwnd));
+  Styles newChrome{}, oldChrome{};
+
+  mHideChrome = aShouldHide;
+  if (aShouldHide) {
+    newChrome = kFullscreenChrome;
+    oldChrome = currentChrome;
+  } else {
+    // if there's nothing to "restore" it to, just use what's there now
+    oldChrome = GetCachedStyles().refOr(currentChrome);
+    newChrome = oldChrome;
     if (mFutureMarginsToUse) {
       SetNonClientMargins(mFutureMarginsOnceChromeShows);
     }
   }
 
-  VERIFY_WINDOW_STYLE(style);
-  ::SetWindowLongPtrW(hwnd, GWL_STYLE, style);
-  ::SetWindowLongPtrW(hwnd, GWL_EXSTYLE, exStyle);
+  SetCachedStyles(oldChrome);
+  SetStyles(hwnd, kChromeMask.merge(chromeless, newChrome));
 }
 
 /**************************************************************
@@ -4934,10 +4934,12 @@ bool nsWindow::ProcessMessageInternal(UINT msg, WPARAM& wParam, LPARAM& lParam,
 
     case WM_SETTINGCHANGE: {
       if (wParam == SPI_SETCLIENTAREAANIMATION ||
-          wParam == SPI_SETKEYBOARDDELAY || wParam == SPI_SETMOUSEVANISH) {
+          wParam == SPI_SETKEYBOARDDELAY || wParam == SPI_SETMOUSEVANISH ||
+          wParam == MOZ_SPI_SETCURSORSIZE) {
         // These need to update LookAndFeel cached values.
         // They affect reduced motion settings / caret blink count / show
-        // pointer while typing, so no need to invalidate style / layout.
+        // pointer while typing / tooltip offset, so no need to invalidate style
+        // / layout.
         NotifyThemeChanged(widget::ThemeChangeKind::MediaQueriesOnly);
         break;
       }
@@ -5147,8 +5149,6 @@ bool nsWindow::ProcessMessageInternal(UINT msg, WPARAM& wParam, LPARAM& lParam,
        * WM_NCACTIVATE paints nc areas. Avoid this and re-route painting
        * through WM_NCPAINT via InvalidateNonClientRegion.
        */
-      UpdateGetWindowInfoCaptionStatus(FALSE != wParam);
-
       if (!mCustomNonClient) {
         break;
       }
@@ -5875,6 +5875,13 @@ bool nsWindow::ProcessMessageInternal(UINT msg, WPARAM& wParam, LPARAM& lParam,
             a11y::LazyInstantiator::GetRootAccessible(mWnd));
         if (root) {
           *aRetValue = LresultFromObject(IID_IAccessible, wParam, root);
+          a11y::LazyInstantiator::EnableBlindAggregation(mWnd);
+          result = true;
+        }
+      } else if (objId == UiaRootObjectId) {
+        if (RefPtr<IRawElementProviderSimple> root =
+                a11y::LazyInstantiator::GetRootUia(mWnd)) {
+          *aRetValue = UiaReturnRawElementProvider(mWnd, wParam, lParam, root);
           a11y::LazyInstantiator::EnableBlindAggregation(mWnd);
           result = true;
         }
@@ -7359,7 +7366,9 @@ a11y::LocalAccessible* nsWindow::GetAccessible() {
  **************************************************************/
 
 void nsWindow::SetWindowTranslucencyInner(TransparencyMode aMode) {
-  if (aMode == mTransparencyMode) return;
+  if (aMode == mTransparencyMode) {
+    return;
+  }
 
   // stop on dialogs and popups!
   HWND hWnd = WinUtils::GetTopLevelHWND(mWnd, true);
@@ -7375,16 +7384,6 @@ void nsWindow::SetWindowTranslucencyInner(TransparencyMode aMode) {
         "Setting SetWindowTranslucencyInner on a parent this is not us!");
   }
 
-  if (aMode == TransparencyMode::Transparent) {
-    // If we're switching to the use of a transparent window, hide the chrome
-    // on our parent.
-    HideWindowChrome(true);
-  } else if (mHideChrome &&
-             mTransparencyMode == TransparencyMode::Transparent) {
-    // if we're switching out of transparent, re-enable our parent's chrome.
-    HideWindowChrome(false);
-  }
-
   LONG_PTR style = ::GetWindowLongPtrW(hWnd, GWL_STYLE),
            exStyle = ::GetWindowLongPtr(hWnd, GWL_EXSTYLE);
 
@@ -7397,10 +7396,11 @@ void nsWindow::SetWindowTranslucencyInner(TransparencyMode aMode) {
     }
   }
 
-  if (aMode == TransparencyMode::Transparent)
+  if (aMode == TransparencyMode::Transparent) {
     exStyle |= WS_EX_LAYERED;
-  else
+  } else {
     exStyle &= ~WS_EX_LAYERED;
+  }
 
   VERIFY_WINDOW_STYLE(style);
   ::SetWindowLongPtrW(hWnd, GWL_STYLE, style);
@@ -7408,9 +7408,45 @@ void nsWindow::SetWindowTranslucencyInner(TransparencyMode aMode) {
 
   mTransparencyMode = aMode;
 
+  UpdateOpaqueRegionInternal();
+
   if (mCompositorWidgetDelegate) {
     mCompositorWidgetDelegate->UpdateTransparency(aMode);
   }
+}
+
+void nsWindow::UpdateOpaqueRegion(const LayoutDeviceIntRegion& aRegion) {
+  if (aRegion == mOpaqueRegion) {
+    return;
+  }
+  mOpaqueRegion = aRegion;
+  UpdateOpaqueRegionInternal();
+}
+
+void nsWindow::UpdateOpaqueRegionInternal() {
+  MARGINS margins{0};
+  if (mTransparencyMode == TransparencyMode::Transparent) {
+    // If there is no opaque region, set margins to support a full sheet of
+    // glass. Comments in MSDN indicate all values must be set to -1 to get a
+    // full sheet of glass.
+    margins = {-1, -1, -1, -1};
+    if (!mOpaqueRegion.IsEmpty()) {
+      LayoutDeviceIntRect clientBounds = GetClientBounds();
+      // Find the largest rectangle and use that to calculate the inset.
+      LayoutDeviceIntRect largest = mOpaqueRegion.GetLargestRectangle();
+      margins.cxLeftWidth = largest.X();
+      margins.cxRightWidth = clientBounds.Width() - largest.XMost();
+      margins.cyBottomHeight = clientBounds.Height() - largest.YMost();
+      margins.cyTopHeight = largest.Y();
+
+      auto ncmargin = NonClientSizeMargin();
+      margins.cxLeftWidth += ncmargin.left;
+      margins.cyTopHeight += ncmargin.top;
+      margins.cxRightWidth += ncmargin.right;
+      margins.cyBottomHeight += ncmargin.bottom;
+    }
+  }
+  DwmExtendFrameIntoClientArea(mWnd, &margins);
 }
 
 /**************************************************************
@@ -8241,35 +8277,14 @@ void nsWindow::PickerClosed() {
 }
 
 bool nsWindow::WidgetTypeSupportsAcceleration() {
-  // We don't currently support using an accelerated layer manager with
-  // transparent windows so don't even try. I'm also not sure if we even
-  // want to support this case. See bug 593471.
-  //
-  // Windows' support for transparent accelerated surfaces isn't great.
-  // Some possible approaches:
-  //  - Readback the data and update it using
-  //  UpdateLayeredWindow/UpdateLayeredWindowIndirect
-  //    This is what WPF does. See
-  //    CD3DDeviceLevel1::PresentWithGDI/CD3DSwapChainWithSwDC in WpfGfx. The
-  //    rationale for not using IDirect3DSurface9::GetDC is explained here:
-  //    https://web.archive.org/web/20160521191104/https://blogs.msdn.microsoft.com/dwayneneed/2008/09/08/transparent-windows-in-wpf/
-  //  - Use D3D11_RESOURCE_MISC_GDI_COMPATIBLE, IDXGISurface1::GetDC(),
-  //    and UpdateLayeredWindowIndirect.
-  //    This is suggested here:
-  //    https://docs.microsoft.com/en-us/archive/msdn-magazine/2009/december/windows-with-c-layered-windows-with-direct2d
-  //    but might have the same problem that IDirect3DSurface9::GetDC has.
-  //  - Creating the window with the WS_EX_NOREDIRECTIONBITMAP flag and use
-  //  DirectComposition.
-  //    Not supported on Win7.
-  //  - Using DwmExtendFrameIntoClientArea with negative margins and something
-  //  to turn off the glass effect.
-  //    This doesn't work when the DWM is not running (Win7)
-  //
-  // Also see bug 1150376, D3D11 composition can cause issues on some devices
-  // on Windows 7 where presentation fails randomly for windows with drop
-  // shadows.
-  return mTransparencyMode != TransparencyMode::Transparent &&
-         !(IsPopup() && DeviceManagerDx::Get()->IsWARP());
+  if (IsPopup()) {
+    // This transparency+popup checks go back to bug 1150376 and bug 943204,
+    // but removing it causes reproducible timeouts on automation, see bug
+    // 1891063 comment 11.
+    return mTransparencyMode != TransparencyMode::Transparent &&
+           !DeviceManagerDx::Get()->IsWARP();
+  }
+  return true;
 }
 
 bool nsWindow::DispatchTouchEventFromWMPointer(

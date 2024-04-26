@@ -20,6 +20,7 @@ const SHORT_TEST_PAGE = TEST_ROOT + "short-test-page.html";
 const LARGE_TEST_PAGE = TEST_ROOT + "large-test-page.html";
 const IFRAME_TEST_PAGE = TEST_ROOT + "iframe-test-page.html";
 const RESIZE_TEST_PAGE = TEST_ROOT + "test-page-resize.html";
+const SELECTION_TEST_PAGE = TEST_ROOT + "test-selectionAPI-page.html";
 
 const { MAX_CAPTURE_DIMENSION, MAX_CAPTURE_AREA } = ChromeUtils.importESModule(
   "resource:///modules/ScreenshotsUtils.sys.mjs"
@@ -159,23 +160,23 @@ class ScreenshotsHelper {
     });
   }
 
-  waitForStateChange(newState) {
-    return SpecialPowers.spawn(this.browser, [newState], async state => {
+  waitForStateChange(newStateArr) {
+    return SpecialPowers.spawn(this.browser, [newStateArr], async stateArr => {
       let screenshotsChild = content.windowGlobalChild.getActor(
         "ScreenshotsComponent"
       );
 
       await ContentTaskUtils.waitForCondition(() => {
-        info(`got ${screenshotsChild.overlay.state}. expected ${state}`);
-        return screenshotsChild.overlay.state === state;
-      }, `Wait for overlay state to be ${state}`);
+        info(`got ${screenshotsChild.overlay.state}. expected ${stateArr}`);
+        return stateArr.includes(screenshotsChild.overlay.state);
+      }, `Wait for overlay state to be ${stateArr}`);
 
       return screenshotsChild.overlay.state;
     });
   }
 
   async assertStateChange(newState) {
-    let currentState = await this.waitForStateChange(newState);
+    let currentState = await this.waitForStateChange([newState]);
 
     is(
       currentState,
@@ -269,18 +270,13 @@ class ScreenshotsHelper {
 
     mouse.down(startX, startY);
 
-    await Promise.any([
-      this.waitForStateChange("draggingReady"),
-      this.waitForStateChange("resizing"),
-    ]);
+    await this.waitForStateChange(["draggingReady", "resizing"]);
     Assert.ok(true, "The overlay is in the draggingReady or resizing state");
 
     mouse.move(endX, endY);
 
-    await Promise.any([
-      this.waitForStateChange("dragging"),
-      this.waitForStateChange("resizing"),
-    ]);
+    await this.waitForStateChange(["dragging", "resizing"]);
+
     Assert.ok(true, "The overlay is in the dragging or resizing state");
     // We intentionally turn off this a11y check, because the following mouse
     // event is emitted at the end of the dragging event. Its keyboard
@@ -324,7 +320,6 @@ class ScreenshotsHelper {
             overlay.topRightMover.focus({ focusVisible: true });
             break;
         }
-        screenshotsChild.overlay.highlightEl.focus();
 
         for (let event of eventsArr) {
           EventUtils.synthesizeKey(
@@ -354,7 +349,6 @@ class ScreenshotsHelper {
   }
 
   async scrollContentWindow(x, y) {
-    let promise = BrowserTestUtils.waitForContentEvent(this.browser, "scroll");
     let contentDims = await this.getContentDimensions();
     await ContentTask.spawn(
       this.browser,
@@ -404,7 +398,6 @@ class ScreenshotsHelper {
         }, `Waiting for window to scroll to ${xPos}, ${yPos}`);
       }
     );
-    await promise;
   }
 
   async waitForScrollTo(x, y) {
@@ -521,6 +514,15 @@ class ScreenshotsHelper {
     });
   }
 
+  getOverlaySelectionSizeText(elementId = "testPageElement") {
+    return ContentTask.spawn(this.browser, [elementId], async () => {
+      let screenshotsChild = content.windowGlobalChild.getActor(
+        "ScreenshotsComponent"
+      );
+      return screenshotsChild.overlay.selectionSize.textContent;
+    });
+  }
+
   async clickTestPageElement(elementId = "testPageElement") {
     let rect = await this.getTestPageElementRect(elementId);
     let dims = await this.getContentDimensions();
@@ -579,7 +581,7 @@ class ScreenshotsHelper {
    * Returns a promise that resolves when the clipboard data has changed
    * Otherwise rejects
    */
-  waitForRawClipboardChange(epectedWidth, expectedHeight) {
+  waitForRawClipboardChange(epectedWidth, expectedHeight, options = {}) {
     const initialClipboardData = Date.now().toString();
     SpecialPowers.clipboardCopyString(initialClipboardData);
 
@@ -587,7 +589,7 @@ class ScreenshotsHelper {
       async () => {
         let data;
         try {
-          data = await this.getImageSizeAndColorFromClipboard();
+          data = await this.getImageSizeAndColorFromClipboard(options);
         } catch (e) {
           console.log("Failed to get image/png clipboard data:", e);
           return false;
@@ -755,7 +757,7 @@ class ScreenshotsHelper {
    * :screenshot command.
    * @return The {width, height, color} dimension and color object.
    */
-  async getImageSizeAndColorFromClipboard() {
+  async getImageSizeAndColorFromClipboard(options = {}) {
     let flavor = "image/png";
     let image = getRawClipboardData(flavor);
     if (!image) {
@@ -795,8 +797,8 @@ class ScreenshotsHelper {
     // which could mess all sorts of things up
     return SpecialPowers.spawn(
       this.browser,
-      [buffer],
-      async function (_buffer) {
+      [buffer, options],
+      async function (_buffer, _options) {
         const img = content.document.createElement("img");
         const loaded = new Promise(r => {
           img.addEventListener("load", r, { once: true });
@@ -829,6 +831,11 @@ class ScreenshotsHelper {
           1
         );
 
+        let allPixels = null;
+        if (_options.allPixels) {
+          allPixels = context.getImageData(0, 0, img.width, img.height);
+        }
+
         img.remove();
         content.URL.revokeObjectURL(url);
 
@@ -841,6 +848,7 @@ class ScreenshotsHelper {
             bottomLeft: bottomLeft.data,
             bottomRight: bottomRight.data,
           },
+          allPixels: allPixels?.data,
         };
       }
     );
@@ -909,6 +917,21 @@ add_setup(async () => {
   );
   let screenshotBtn = document.getElementById("screenshot-button");
   Assert.ok(screenshotBtn, "The screenshots button was added to the nav bar");
+
+  registerCleanupFunction(async () => {
+    info(`downloads panel should be visible: ${DownloadsPanel.isPanelShowing}`);
+    if (DownloadsPanel.isPanelShowing) {
+      let hiddenPromise = BrowserTestUtils.waitForEvent(
+        DownloadsPanel.panel,
+        "popuphidden"
+      );
+      DownloadsPanel.hidePanel();
+      await hiddenPromise;
+      info(
+        `downloads panel should not be visible: ${DownloadsPanel.isPanelShowing}`
+      );
+    }
+  });
 });
 
 function getContentDevicePixelRatio(browser) {

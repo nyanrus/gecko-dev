@@ -1273,7 +1273,7 @@ bool js::HandleClosingGeneratorReturn(JSContext* cx, AbstractFramePtr frame,
     cx->clearPendingException();
     ok = true;
     auto* genObj = GetGeneratorObjectForFrame(cx, frame);
-    genObj->setClosed();
+    genObj->setClosed(cx);
   }
   return ok;
 }
@@ -4140,13 +4140,7 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
         }
 
         if (!DebugAPI::onResumeFrame(cx, REGS.fp())) {
-          if (cx->isPropagatingForcedReturn()) {
-            MOZ_ASSERT_IF(
-                REGS.fp()
-                    ->callee()
-                    .isGenerator(),  // as opposed to an async function
-                gen->isClosed());
-          }
+          MOZ_ASSERT_IF(cx->isPropagatingForcedReturn(), gen->isClosed());
           goto error;
         }
       }
@@ -4164,7 +4158,7 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
     CASE(FinalYieldRval) {
       ReservedRooted<JSObject*> gen(&rootObject0, &REGS.sp[-1].toObject());
       REGS.sp--;
-      AbstractGeneratorObject::finalSuspend(gen);
+      AbstractGeneratorObject::finalSuspend(cx, gen);
       goto successful_return_continuation;
     }
 

@@ -66,16 +66,7 @@ function warning(msg, exception) {
   Services.console.logMessage(consoleMsg);
 }
 
-var gOnceInitializedDeferred = (function () {
-  let deferred = {};
-
-  deferred.promise = new Promise((resolve, reject) => {
-    deferred.resolve = resolve;
-    deferred.reject = reject;
-  });
-
-  return deferred;
-})();
+var gOnceInitializedDeferred = Promise.withResolvers();
 
 /* :::::::: The Service ::::::::::::::: */
 
@@ -158,6 +149,11 @@ export var SessionStartup = {
    */
   _onSessionFileRead({ source, parsed, noFilesFound }) {
     this._initialized = true;
+    const crashReasons = {
+      FINAL_STATE_WRITING_INCOMPLETE: "final-state-write-incomplete",
+      SESSION_STATE_FLAG_MISSING:
+        "session-state-missing-or-running-at-last-write",
+    };
 
     // Let observers modify the state before it is used
     let supportsStateString = this._createSupportsString(source);
@@ -210,12 +206,17 @@ export var SessionStartup = {
       delete this._initialState.lastSessionState;
     }
 
+    let previousSessionCrashedReason = "N/A";
     lazy.CrashMonitor.previousCheckpoints.then(checkpoints => {
       if (checkpoints) {
         // If the previous session finished writing the final state, we'll
         // assume there was no crash.
         this._previousSessionCrashed =
           !checkpoints["sessionstore-final-state-write-complete"];
+        if (!checkpoints["sessionstore-final-state-write-complete"]) {
+          previousSessionCrashedReason =
+            crashReasons.FINAL_STATE_WRITING_INCOMPLETE;
+        }
       } else if (noFilesFound) {
         // If the Crash Monitor could not load a checkpoints file it will
         // provide null. This could occur on the first run after updating to
@@ -241,6 +242,13 @@ export var SessionStartup = {
         this._previousSessionCrashed =
           !stateFlagPresent ||
           this._initialState.session.state == STATE_RUNNING_STR;
+        if (
+          !stateFlagPresent ||
+          this._initialState.session.state == STATE_RUNNING_STR
+        ) {
+          previousSessionCrashedReason =
+            crashReasons.SESSION_STATE_FLAG_MISSING;
+        }
       }
 
       // Report shutdown success via telemetry. Shortcoming here are
@@ -249,6 +257,16 @@ export var SessionStartup = {
       Services.telemetry
         .getHistogramById("SHUTDOWN_OK")
         .add(!this._previousSessionCrashed);
+      Services.telemetry.recordEvent(
+        "session_restore",
+        "shutdown_success",
+        "session_startup",
+        null,
+        {
+          shutdown_ok: this._previousSessionCrashed.toString(),
+          shutdown_reason: previousSessionCrashedReason,
+        }
+      );
 
       Services.obs.addObserver(this, "sessionstore-windows-restored", true);
 
@@ -268,7 +286,7 @@ export var SessionStartup = {
   /**
    * Handle notifications
    */
-  observe(subject, topic, data) {
+  observe(subject, topic) {
     switch (topic) {
       case "sessionstore-windows-restored":
         Services.obs.removeObserver(this, "sessionstore-windows-restored");

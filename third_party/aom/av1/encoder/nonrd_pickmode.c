@@ -1886,14 +1886,17 @@ static AOM_INLINE int skip_mode_by_low_temp(
 
 static AOM_INLINE int skip_mode_by_bsize_and_ref_frame(
     PREDICTION_MODE mode, MV_REFERENCE_FRAME ref_frame, BLOCK_SIZE bsize,
-    int extra_prune, unsigned int sse_zeromv_norm, int more_prune) {
+    int extra_prune, unsigned int sse_zeromv_norm, int more_prune,
+    int skip_nearmv) {
   const unsigned int thresh_skip_golden = 500;
 
   if (ref_frame != LAST_FRAME && sse_zeromv_norm < thresh_skip_golden &&
       mode == NEWMV)
     return 1;
 
-  if (bsize == BLOCK_128X128 && mode == NEWMV) return 1;
+  if ((bsize == BLOCK_128X128 && mode == NEWMV) ||
+      (skip_nearmv && mode == NEARMV))
+    return 1;
 
   // Skip testing non-LAST if this flag is set.
   if (extra_prune) {
@@ -2357,6 +2360,22 @@ static AOM_FORCE_INLINE bool skip_inter_mode_nonrd(
     *ref_frame2 = NONE_FRAME;
   }
 
+  if (segfeature_active(&cm->seg, segment_id, SEG_LVL_SKIP) &&
+      (*this_mode != GLOBALMV || *ref_frame != LAST_FRAME))
+    return true;
+
+  // Skip the mode if use reference frame mask flag is not set.
+  if (!search_state->use_ref_frame_mask[*ref_frame]) return true;
+
+  // Skip mode for some modes and reference frames when
+  // force_zeromv_skip_for_blk flag is true.
+  if (x->force_zeromv_skip_for_blk &&
+      ((!(*this_mode == NEARESTMV &&
+          search_state->frame_mv[*this_mode][*ref_frame].as_int == 0) &&
+        *this_mode != GLOBALMV) ||
+       *ref_frame != LAST_FRAME))
+    return true;
+
   if (x->sb_me_block && *ref_frame == LAST_FRAME) {
     // We want to make sure to test the superblock MV:
     // so don't skip (return false) for NEAREST_LAST or NEAR_LAST if they
@@ -2395,18 +2414,6 @@ static AOM_FORCE_INLINE bool skip_inter_mode_nonrd(
   mi->mode = *this_mode;
   mi->ref_frame[0] = *ref_frame;
   mi->ref_frame[1] = *ref_frame2;
-
-  // Skip the mode if use reference frame mask flag is not set.
-  if (!search_state->use_ref_frame_mask[*ref_frame]) return true;
-
-  // Skip mode for some modes and reference frames when
-  // force_zeromv_skip_for_blk flag is true.
-  if (x->force_zeromv_skip_for_blk &&
-      ((!(*this_mode == NEARESTMV &&
-          search_state->frame_mv[*this_mode][*ref_frame].as_int == 0) &&
-        *this_mode != GLOBALMV) ||
-       *ref_frame != LAST_FRAME))
-    return true;
 
   // Skip compound mode based on variance of previously evaluated single
   // reference modes.
@@ -2474,7 +2481,8 @@ static AOM_FORCE_INLINE bool skip_inter_mode_nonrd(
   // properties.
   if (skip_mode_by_bsize_and_ref_frame(
           *this_mode, *ref_frame, bsize, x->nonrd_prune_ref_frame_search,
-          sse_zeromv_norm, rt_sf->nonrd_aggressive_skip))
+          sse_zeromv_norm, rt_sf->nonrd_aggressive_skip,
+          rt_sf->increase_source_sad_thresh))
     return true;
 
   // Skip mode based on low temporal variance and souce sad.
@@ -3241,7 +3249,8 @@ void av1_nonrd_pick_inter_mode_sb(AV1_COMP *cpi, TileDataEnc *tile_data,
   inter_pred_params_sr.conv_params =
       get_conv_params(/*do_average=*/0, AOM_PLANE_Y, xd->bd);
 
-  x->block_is_zero_sad = x->content_state_sb.source_sad_nonrd == kZeroSad;
+  x->block_is_zero_sad = x->content_state_sb.source_sad_nonrd == kZeroSad ||
+                         segfeature_active(&cm->seg, segment_id, SEG_LVL_SKIP);
   if (cpi->oxcf.tune_cfg.content == AOM_CONTENT_SCREEN &&
       !x->force_zeromv_skip_for_blk &&
       x->content_state_sb.source_sad_nonrd != kZeroSad &&

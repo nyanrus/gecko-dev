@@ -204,7 +204,10 @@ function init_all() {
   register_module("paneSearch", gSearchPane);
   register_module("panePrivacy", gPrivacyPane);
   register_module("paneContainers", gContainersPane);
-  register_module("paneTranslations", gTranslationsPane);
+
+  if (Services.prefs.getBoolPref("browser.translations.newSettingsUI.enable")) {
+    register_module("paneTranslations", gTranslationsPane);
+  }
   if (Services.prefs.getBoolPref("browser.preferences.experimental")) {
     // Set hidden based on previous load's hidden value.
     document.getElementById("category-experimental").hidden =
@@ -261,7 +264,7 @@ function init_all() {
         return;
       }
       let mainWindow = window.browsingContext.topChromeWindow;
-      mainWindow.BrowserOpenAddonsMgr();
+      mainWindow.BrowserAddonUI.openAddonsMgr();
     });
 
     document.dispatchEvent(
@@ -271,22 +274,6 @@ function init_all() {
       })
     );
   });
-}
-
-function telemetryBucketForCategory(category) {
-  category = category.toLowerCase();
-  switch (category) {
-    case "containers":
-    case "general":
-    case "home":
-    case "privacy":
-    case "search":
-    case "sync":
-    case "searchresults":
-      return category;
-    default:
-      return "unknown";
-  }
 }
 
 function onHashChange() {
@@ -451,16 +438,6 @@ function search(aQuery, aAttribute) {
     }
     element.classList.remove("visually-hidden");
   }
-
-  let keysets = mainPrefPane.getElementsByTagName("keyset");
-  for (let element of keysets) {
-    let attributeValue = element.getAttribute(aAttribute);
-    if (attributeValue == aQuery) {
-      element.removeAttribute("disabled");
-    } else {
-      element.setAttribute("disabled", true);
-    }
-  }
 }
 
 async function spotlight(subcategory, category) {
@@ -598,8 +575,9 @@ async function confirmRestartPrompt(
       break;
   }
 
-  let buttonIndex = Services.prompt.confirmEx(
-    window,
+  let button = await Services.prompt.asyncConfirmEx(
+    window.browsingContext,
+    Ci.nsIPrompt.MODAL_TYPE_CONTENT,
     title,
     msg,
     buttonFlags,
@@ -609,6 +587,8 @@ async function confirmRestartPrompt(
     null,
     {}
   );
+
+  let buttonIndex = button.get("buttonNumClicked");
 
   // If we have the second confirmation dialog for restart, see if the user
   // cancels out at that point.

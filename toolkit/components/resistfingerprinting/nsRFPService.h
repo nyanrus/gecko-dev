@@ -1,7 +1,7 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #ifndef __nsRFPService_h__
 #define __nsRFPService_h__
@@ -40,8 +40,8 @@
 #  define SPOOFED_OSCPU "Intel Mac OS X 10.15"
 #  define SPOOFED_PLATFORM "MacIntel"
 #elif defined(MOZ_WIDGET_ANDROID)
-#  define SPOOFED_UA_OS "Android 10; Mobile"
-#  define SPOOFED_APPVERSION "5.0 (Android 10)"
+#  define SPOOFED_UA_OS "Linux; Android 10; Mobile"
+#  define SPOOFED_APPVERSION "5.0 (Linux; Android 10)"
 #  define SPOOFED_OSCPU "Linux armv81"
 #  define SPOOFED_PLATFORM "Linux armv81"
 #else
@@ -61,7 +61,7 @@
 // For the HTTP User-Agent header, we use a simpler set of spoofed values
 // that do not reveal the specific desktop platform.
 #if defined(MOZ_WIDGET_ANDROID)
-#  define SPOOFED_HTTP_UA_OS "Android 10; Mobile"
+#  define SPOOFED_HTTP_UA_OS "Linux; Android 10; Mobile"
 #else
 #  define SPOOFED_HTTP_UA_OS "Windows NT 10.0"
 #endif

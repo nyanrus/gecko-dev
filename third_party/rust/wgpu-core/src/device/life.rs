@@ -12,6 +12,7 @@ use crate::{
         self, Buffer, DestroyedBuffer, DestroyedTexture, QuerySet, Resource, Sampler,
         StagingBuffer, Texture, TextureView,
     },
+    snatch::SnatchGuard,
     track::{ResourceTracker, Tracker, TrackerIndex},
     FastHashMap, SubmissionIndex,
 };
@@ -22,7 +23,6 @@ use std::sync::Arc;
 use thiserror::Error;
 
 /// A struct that keeps lists of resources that are no longer needed by the user.
-#[derive(Default)]
 pub(crate) struct ResourceMaps<A: HalApi> {
     pub buffers: FastHashMap<TrackerIndex, Arc<Buffer<A>>>,
     pub staging_buffers: FastHashMap<TrackerIndex, Arc<StagingBuffer<A>>>,
@@ -149,6 +149,16 @@ struct ActiveSubmission<A: HalApi> {
     /// Buffers to be mapped once this submission has completed.
     mapped: Vec<Arc<Buffer<A>>>,
 
+    /// Command buffers used by this submission, and the encoder that owns them.
+    ///
+    /// [`wgpu_hal::Queue::submit`] requires the submitted command buffers to
+    /// remain alive until the submission has completed execution. Command
+    /// encoders double as allocation pools for command buffers, so holding them
+    /// here and cleaning them up in [`LifetimeTracker::triage_submissions`]
+    /// satisfies that requirement.
+    ///
+    /// Once this submission has completed, the command buffers are reset and
+    /// the command encoder is recycled.
     encoders: Vec<EncoderInFlight<A>>,
 
     /// List of queue "on_submitted_work_done" closures to be called once this
@@ -309,12 +319,12 @@ impl<A: HalApi> LifetimeTracker<A> {
     }
 
     pub fn post_submit(&mut self) {
-        for v in self.future_suspected_buffers.drain(..).take(1) {
+        for v in self.future_suspected_buffers.drain(..) {
             self.suspected_resources
                 .buffers
                 .insert(v.as_info().tracker_index(), v);
         }
-        for v in self.future_suspected_textures.drain(..).take(1) {
+        for v in self.future_suspected_textures.drain(..) {
             self.suspected_resources
                 .textures
                 .insert(v.as_info().tracker_index(), v);
@@ -350,7 +360,7 @@ impl<A: HalApi> LifetimeTracker<A> {
     pub fn triage_submissions(
         &mut self,
         last_done: SubmissionIndex,
-        command_allocator: &mut super::CommandAllocator<A>,
+        command_allocator: &crate::command::CommandAllocator<A>,
     ) -> SmallVec<[SubmittedWorkDoneClosure; 1]> {
         profiling::scope!("triage_submissions");
 
@@ -780,6 +790,7 @@ impl<A: HalApi> LifetimeTracker<A> {
         &mut self,
         raw: &A::Device,
         trackers: &Mutex<Tracker<A>>,
+        snatch_guard: &SnatchGuard,
     ) -> Vec<super::BufferMapPendingClosure> {
         if self.ready_to_map.is_empty() {
             return Vec::new();
@@ -816,7 +827,14 @@ impl<A: HalApi> LifetimeTracker<A> {
                     log::debug!("Buffer {tracker_index:?} map state -> Active");
                     let host = mapping.op.host;
                     let size = mapping.range.end - mapping.range.start;
-                    match super::map_buffer(raw, &buffer, mapping.range.start, size, host) {
+                    match super::map_buffer(
+                        raw,
+                        &buffer,
+                        mapping.range.start,
+                        size,
+                        host,
+                        snatch_guard,
+                    ) {
                         Ok(ptr) => {
                             *buffer.map_state.lock() = resource::BufferMapState::Active {
                                 ptr,

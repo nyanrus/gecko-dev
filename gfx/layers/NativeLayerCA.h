@@ -153,7 +153,8 @@ class NativeLayerRootCA : public NativeLayerRoot {
     explicit Representation(CALayer* aRootCALayer);
     ~Representation();
     void Commit(WhichRepresentation aRepresentation,
-                const nsTArray<RefPtr<NativeLayerCA>>& aSublayers);
+                const nsTArray<RefPtr<NativeLayerCA>>& aSublayers,
+                bool aWindowIsFullscreen);
     CALayer* mRootCALayer = nullptr;  // strong
     bool mMutatedLayerStructure = false;
   };
@@ -267,6 +268,8 @@ class NativeLayerCA : public NativeLayer {
   void DumpLayer(std::ostream& aOutputStream);
 
   void AttachExternalImage(wr::RenderTextureHost* aExternalImage) override;
+
+  void SetRootWindowIsFullscreen(bool aFullscreen);
 
  protected:
   friend class NativeLayerRootCA;
@@ -476,6 +479,7 @@ class NativeLayerCA : public NativeLayer {
   bool mSurfaceIsFlipped = false;
   CFTypeRefPtr<CGColorRef> mColor;
   const bool mIsOpaque = false;
+  bool mRootWindowIsFullscreen = false;
   bool mSpecializeVideo = false;
   bool mHasExtent = false;
   bool mIsDRM = false;

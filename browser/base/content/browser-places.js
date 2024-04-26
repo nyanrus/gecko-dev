@@ -17,7 +17,7 @@ XPCOMUtils.defineLazyPreferenceGetter(
   "SHOW_OTHER_BOOKMARKS",
   "browser.toolbars.bookmarks.showOtherBookmarks",
   true,
-  (aPref, aPrevVal, aNewVal) => {
+  () => {
     BookmarkingUI.maybeShowOtherBookmarksFolder().then(() => {
       document
         .getElementById("PlacesToolbar")
@@ -55,7 +55,6 @@ var StarUI = {
     delete this.panel;
     this._createPanelIfNeeded();
     var element = this._element("editBookmarkPanel");
-    window.ensureCustomElements("moz-button-group");
     // initially the panel is hidden
     // to avoid impacting startup / new window performance
     element.hidden = false;
@@ -253,7 +252,7 @@ var StarUI = {
       }
       target.addEventListener(
         "popupshown",
-        function (event) {
+        function () {
           fn();
         },
         { capture: true, once: true }
@@ -1174,7 +1173,7 @@ var PlacesToolbarHelper = {
     return null;
   },
 
-  onWidgetUnderflow(aNode, aContainer) {
+  onWidgetUnderflow(aNode) {
     // The view gets broken by being removed and reinserted by the overflowable
     // toolbar, so we have to force an uninit and reinit.
     let win = aNode.ownerGlobal;
@@ -1183,7 +1182,7 @@ var PlacesToolbarHelper = {
     }
   },
 
-  onWidgetAdded(aWidgetId, aArea, aPosition) {
+  onWidgetAdded(aWidgetId) {
     if (aWidgetId == "personal-bookmarks" && !this._isCustomizing) {
       // It's possible (with the "Add to Menu", "Add to Toolbar" context
       // options) that the Places Toolbar Items have been moved without
@@ -1659,13 +1658,13 @@ var BookmarkingUI = {
     }
   },
 
-  onWidgetReset: function BUI_widgetReset(aNode, aContainer) {
+  onWidgetReset: function BUI_widgetReset(aNode) {
     if (aNode == this.button) {
       this._onWidgetWasMoved();
     }
   },
 
-  onWidgetUndoMove: function BUI_undoWidgetUndoMove(aNode, aContainer) {
+  onWidgetUndoMove: function BUI_undoWidgetUndoMove(aNode) {
     if (aNode == this.button) {
       this._onWidgetWasMoved();
     }
@@ -1999,6 +1998,13 @@ var BookmarkingUI = {
       case "ViewHiding":
         this.onPanelMenuViewHiding(aEvent);
         break;
+      case "command":
+        if (aEvent.target.id == "panelMenu_searchBookmarks") {
+          PlacesCommandHook.searchBookmarks();
+        } else if (aEvent.target.id == "panelMenu_viewBookmarksToolbar") {
+          this.toggleBookmarksToolbar("bookmark-tools");
+        }
+        break;
     }
   },
 
@@ -2026,12 +2032,15 @@ var BookmarkingUI = {
       panelview
     );
     panelview.removeEventListener("ViewShowing", this);
+    panelview.addEventListener("command", this);
   },
 
   onPanelMenuViewHiding: function BUI_onViewHiding(aEvent) {
     this._panelMenuView.uninit();
     delete this._panelMenuView;
-    aEvent.target.removeEventListener("ViewHiding", this);
+    let panelview = aEvent.target;
+    panelview.removeEventListener("ViewHiding", this);
+    panelview.removeEventListener("command", this);
   },
 
   handlePlacesEvents(aEvents) {
@@ -2155,7 +2164,7 @@ var BookmarkingUI = {
     });
   },
 
-  onWidgetUnderflow(aNode, aContainer) {
+  onWidgetUnderflow(aNode) {
     let win = aNode.ownerGlobal;
     if (aNode.id != this.BOOKMARK_BUTTON_ID || win != window) {
       return;

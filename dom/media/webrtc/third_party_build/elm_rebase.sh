@@ -54,10 +54,21 @@ be as simple as running the following commands:
 COMMIT_LIST_FILE=$TMP_DIR/rebase-commit-list.txt
 export HGPLAIN=1
 
+if [ "x$MOZ_TOP_FF" = "x" ]; then
+  MOZ_TOP_FF=""
+fi
+if [ "x$MOZ_BOTTOM_FF" = "x" ]; then
+  MOZ_BOTTOM_FF=""
+fi
+if [ "x$STOP_FOR_REORDER" = "x" ]; then
+  STOP_FOR_REORDER=""
+fi
+
 # After this point:
 # * eE: All commands should succeed.
+# * u: All variables should be defined before use.
 # * o pipefail: All stages of all pipes should succeed.
-set -eEo pipefail
+set -eEuo pipefail
 
 if [ -f $STATE_DIR/rebase_resume_state ]; then
   source $STATE_DIR/rebase_resume_state
@@ -119,12 +130,6 @@ That command looks like:
   fi
   ERROR_HELP=""
 
-  # After this point:
-  # * eE: All commands should succeed.
-  # * u: All variables should be defined before use.
-  # * o pipefail: All stages of all pipes should succeed.
-  set -eEuo pipefail
-
   MOZ_NEW_CENTRAL=`hg log -r central -T"{node|short}"`
 
   echo "bottom of fast-foward tree is $MOZ_BOTTOM_FF"
@@ -153,6 +158,15 @@ export MOZ_BOOKMARK=$MOZ_BOOKMARK
 " > $STATE_DIR/rebase_resume_state
 fi # if [ -f $STATE_DIR/rebase_resume_state ]; then ; else
 
+if [ "x$STOP_FOR_REORDER" = "x1" ]; then
+  echo ""
+  echo "Stopping after generating commit list ($COMMIT_LIST_FILE) to"
+  echo "allow tweaking commit ordering.  Re-running $0 will resume the"
+  echo "rebase processing.  To stop processing during the rebase,"
+  echo "insert a line with only 'STOP'."
+  exit
+fi
+
 # grab all commits
 COMMITS=`cat $COMMIT_LIST_FILE | awk '{print $1;}'`
 
@@ -170,6 +184,12 @@ for commit in $COMMITS; do
     echo "Removing from list '$FULL_COMMIT_LINE'"
     ed -s $COMMIT_LIST_FILE <<< $'1d\nw\nq'
   }
+
+  if [ "$FULL_COMMIT_LINE" == "STOP" ]; then
+    echo "Stopping for history editing.  Re-run $0 to resume."
+    remove_commit
+    exit
+  fi
 
   IS_BUILD_COMMIT=`hg log -T '{desc|firstline}' -r $commit \
                    | grep "file updates" | wc -l | tr -d " " || true`

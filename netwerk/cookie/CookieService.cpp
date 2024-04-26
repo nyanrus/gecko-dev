@@ -1180,6 +1180,16 @@ static void RecordPartitionedTelemetry(const CookieStruct& aCookieData,
   }
 }
 
+static bool HasSecurePrefix(const nsACString& aString) {
+  return StringBeginsWith(aString, "__Secure-"_ns,
+                          nsCaseInsensitiveCStringComparator);
+}
+
+static bool HasHostPrefix(const nsACString& aString) {
+  return StringBeginsWith(aString, "__Host-"_ns,
+                          nsCaseInsensitiveCStringComparator);
+}
+
 // processes a single cookie, and returns true if there are more cookies
 // to be processed
 bool CookieService::CanSetCookie(
@@ -1290,9 +1300,12 @@ bool CookieService::CanSetCookie(
     return newCookie;
   }
 
-  if (!CheckHiddenPrefix(aCookieData)) {
+  // If a cookie is nameless, then its value must not start with
+  // `__Host-` or `__Secure-`
+  if (aCookieData.name().IsEmpty() && (HasSecurePrefix(aCookieData.value()) ||
+                                       HasHostPrefix(aCookieData.value()))) {
     COOKIE_LOGFAILURE(SET_COOKIE, aHostURI, savedCookieHeader,
-                      "failed the CheckHiddenPrefix tests");
+                      "failed hidden prefix tests");
     CookieLogging::LogMessageToConsole(
         aCRC, aHostURI, nsIScriptError::warningFlag, CONSOLE_REJECTION_CATEGORY,
         "CookieRejectedInvalidPrefix"_ns,
@@ -1967,25 +1980,6 @@ bool CookieService::CheckDomain(CookieStruct& aCookieData, nsIURI* aHostURI,
   return true;
 }
 
-// static
-bool CookieService::CheckHiddenPrefix(CookieStruct& aCookieData) {
-  // If a cookie is nameless, then its value must not start with
-  // `__Host-` or `__Secure-`
-  if (!aCookieData.name().IsEmpty()) {
-    return true;
-  }
-
-  if (StringBeginsWith(aCookieData.value(), "__Host-"_ns)) {
-    return false;
-  }
-
-  if (StringBeginsWith(aCookieData.value(), "__Secure-"_ns)) {
-    return false;
-  }
-
-  return true;
-}
-
 namespace {
 nsAutoCString GetPathFromURI(nsIURI* aHostURI) {
   // strip down everything after the last slash to get the path,
@@ -2053,15 +2047,10 @@ bool CookieService::CheckPath(CookieStruct& aCookieData,
 // regularized and validated the CookieStruct values!
 bool CookieService::CheckPrefixes(CookieStruct& aCookieData,
                                   bool aSecureRequest) {
-  static const char kSecure[] = "__Secure-";
-  static const char kHost[] = "__Host-";
-  static const int kSecureLen = sizeof(kSecure) - 1;
-  static const int kHostLen = sizeof(kHost) - 1;
+  bool hasSecurePrefix = HasSecurePrefix(aCookieData.name());
+  bool hasHostPrefix = HasHostPrefix(aCookieData.name());
 
-  bool isSecure = strncmp(aCookieData.name().get(), kSecure, kSecureLen) == 0;
-  bool isHost = strncmp(aCookieData.name().get(), kHost, kHostLen) == 0;
-
-  if (!isSecure && !isHost) {
+  if (!hasSecurePrefix && !hasHostPrefix) {
     // not one of the magic prefixes: carry on
     return true;
   }
@@ -2072,7 +2061,7 @@ bool CookieService::CheckPrefixes(CookieStruct& aCookieData,
     return false;
   }
 
-  if (isHost) {
+  if (hasHostPrefix) {
     // The host prefix requires that the path is "/" and that the cookie
     // had no domain attribute. CheckDomain() and CheckPath() MUST be run
     // first to make sure invalid attributes are rejected and to regularlize

@@ -80,8 +80,6 @@ module.exports = {
     },
   ],
   rules: {
-    "fetch-options/no-fetch-credentials": "error",
-
     "react/jsx-boolean-value": ["error", "always"],
     "react/jsx-key": "error",
     "react/jsx-no-bind": [
@@ -113,6 +111,8 @@ module.exports = {
           "layout",
           "pos",
           "hide-secondary-section",
+          "reverse-split",
+          "no-rdm",
         ],
       },
     ],

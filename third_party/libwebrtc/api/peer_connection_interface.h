@@ -112,6 +112,7 @@
 #include "api/set_remote_description_observer_interface.h"
 #include "api/stats/rtc_stats_collector_callback.h"
 #include "api/task_queue/task_queue_factory.h"
+#include "api/transport/bandwidth_estimation_settings.h"
 #include "api/transport/bitrate_settings.h"
 #include "api/transport/enums.h"
 #include "api/transport/network_control.h"
@@ -451,15 +452,6 @@ class RTC_EXPORT PeerConnectionInterface : public webrtc::RefCountInterface {
     // when switching from a static scene to one with motion.
     absl::optional<int> screencast_min_bitrate;
 
-#if defined(WEBRTC_FUCHSIA)
-    // TODO(bugs.webrtc.org/11066): Remove entirely once Fuchsia does not use.
-    // TODO(bugs.webrtc.org/9891) - Move to crypto_options
-    // Can be used to disable DTLS-SRTP. This should never be done, but can be
-    // useful for testing purposes, for example in setting up a loopback call
-    // with a single PeerConnection.
-    absl::optional<bool> enable_dtls_srtp;
-#endif
-
     /////////////////////////////////////////////////
     // The below fields are not part of the standard.
     /////////////////////////////////////////////////
@@ -686,7 +678,6 @@ class RTC_EXPORT PeerConnectionInterface : public webrtc::RefCountInterface {
     PortAllocatorConfig port_allocator_config;
 
     // The burst interval of the pacer, see TaskQueuePacedSender constructor.
-    // TODO(hbos): Deprecated, Remove once Chromium is not setting it.
     absl::optional<TimeDelta> pacer_burst_interval;
 
     //
@@ -1143,6 +1134,13 @@ class RTC_EXPORT PeerConnectionInterface : public webrtc::RefCountInterface {
   // to the provided value.
   virtual RTCError SetBitrate(const BitrateSettings& bitrate) = 0;
 
+  // Allows an application to reconfigure bandwidth estimation.
+  // The method can be called both before and after estimation has started.
+  // Estimation starts when the first RTP packet is sent.
+  // Estimation will be restarted if already started.
+  virtual void ReconfigureBandwidthEstimation(
+      const BandwidthEstimationSettings& settings) {}
+
   // Enable/disable playout of received audio streams. Enabled by default. Note
   // that even if playout is enabled, streams will only be played out if the
   // appropriate SDP is also applied. Setting `playout` to false will stop
@@ -1441,7 +1439,12 @@ struct RTC_EXPORT PeerConnectionFactoryDependencies final {
   std::unique_ptr<FieldTrialsView> trials;
   std::unique_ptr<RtpTransportControllerSendFactoryInterface>
       transport_controller_send_factory;
-  std::unique_ptr<Metronome> metronome;
+  // Metronome used for decoding, must be called on the worker thread.
+  std::unique_ptr<Metronome> decode_metronome;
+  // Metronome used for encoding, must be called on the worker thread.
+  // TODO(b/304158952): Consider merging into a single metronome for all codec
+  // usage.
+  std::unique_ptr<Metronome> encode_metronome;
 
   // Media specific dependencies. Unused when `media_factory == nullptr`.
   rtc::scoped_refptr<AudioDeviceModule> adm;

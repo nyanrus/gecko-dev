@@ -7,8 +7,8 @@ use crate::{
         bgl,
         life::{LifetimeTracker, WaitIdleError},
         queue::PendingWrites,
-        AttachmentData, CommandAllocator, DeviceLostInvocation, MissingDownlevelFlags,
-        MissingFeatures, RenderPassContext, CLEANUP_WAIT_MS,
+        AttachmentData, DeviceLostInvocation, MissingDownlevelFlags, MissingFeatures,
+        RenderPassContext, CLEANUP_WAIT_MS,
     },
     hal_api::HalApi,
     hal_label,
@@ -28,7 +28,10 @@ use crate::{
     resource_log,
     snatch::{SnatchGuard, SnatchLock, Snatchable},
     storage::Storage,
-    track::{BindGroupStates, TextureSelector, Tracker, TrackerIndexAllocators},
+    track::{
+        BindGroupStates, TextureSelector, Tracker, TrackerIndexAllocators, UsageScope,
+        UsageScopePool,
+    },
     validation::{
         self, check_buffer_usage, check_texture_usage, validate_color_attachment_bytes_per_sample,
     },
@@ -94,9 +97,11 @@ pub struct Device<A: HalApi> {
     pub(crate) zero_buffer: Option<A::Buffer>,
     pub(crate) info: ResourceInfo<Device<A>>,
 
-    pub(crate) command_allocator: Mutex<Option<CommandAllocator<A>>>,
+    pub(crate) command_allocator: command::CommandAllocator<A>,
     //Note: The submission index here corresponds to the last submission that is done.
     pub(crate) active_submission_index: AtomicU64, //SubmissionIndex,
+    // NOTE: if both are needed, the `snatchable_lock` must be consistently acquired before the
+    // `fence` lock to avoid deadlocks.
     pub(crate) fence: RwLock<Option<A::Fence>>,
     pub(crate) snatchable_lock: SnatchLock,
 
@@ -135,6 +140,7 @@ pub struct Device<A: HalApi> {
     pub(crate) deferred_destroy: Mutex<Vec<DeferredDestroy<A>>>,
     #[cfg(feature = "trace")]
     pub(crate) trace: Mutex<Option<trace::Trace>>,
+    pub(crate) usage_scopes: UsageScopePool<A>,
 }
 
 pub(crate) enum DeferredDestroy<A: HalApi> {
@@ -159,7 +165,7 @@ impl<A: HalApi> Drop for Device<A> {
         let raw = self.raw.take().unwrap();
         let pending_writes = self.pending_writes.lock().take().unwrap();
         pending_writes.dispose(&raw);
-        self.command_allocator.lock().take().unwrap().dispose(&raw);
+        self.command_allocator.dispose(&raw);
         unsafe {
             raw.destroy_buffer(self.zero_buffer.take().unwrap());
             raw.destroy_fence(self.fence.write().take().unwrap());
@@ -217,10 +223,8 @@ impl<A: HalApi> Device<A> {
         let fence =
             unsafe { raw_device.create_fence() }.map_err(|_| CreateDeviceError::OutOfMemory)?;
 
-        let mut com_alloc = CommandAllocator {
-            free_encoders: Vec::new(),
-        };
-        let pending_encoder = com_alloc
+        let command_allocator = command::CommandAllocator::new();
+        let pending_encoder = command_allocator
             .acquire_encoder(&raw_device, raw_queue)
             .map_err(|_| CreateDeviceError::OutOfMemory)?;
         let mut pending_writes = queue::PendingWrites::<A>::new(pending_encoder);
@@ -265,7 +269,7 @@ impl<A: HalApi> Device<A> {
             queue_to_drop: OnceCell::new(),
             zero_buffer: Some(zero_buffer),
             info: ResourceInfo::new("<device>", None),
-            command_allocator: Mutex::new(Some(com_alloc)),
+            command_allocator,
             active_submission_index: AtomicU64::new(0),
             fence: RwLock::new(Some(fence)),
             snatchable_lock: unsafe { SnatchLock::new() },
@@ -296,6 +300,7 @@ impl<A: HalApi> Device<A> {
             instance_flags,
             pending_writes: Mutex::new(Some(pending_writes)),
             deferred_destroy: Mutex::new(Vec::new()),
+            usage_scopes: Default::default(),
         })
     }
 
@@ -372,7 +377,7 @@ impl<A: HalApi> Device<A> {
 
     /// Check this device for completed commands.
     ///
-    /// The `maintain` argument tells how the maintence function should behave, either
+    /// The `maintain` argument tells how the maintenance function should behave, either
     /// blocking or just polling the current state of the gpu.
     ///
     /// Return a pair `(closures, queue_empty)`, where:
@@ -387,6 +392,7 @@ impl<A: HalApi> Device<A> {
         &'this self,
         fence: &A::Fence,
         maintain: wgt::Maintain<queue::WrappedSubmissionIndex>,
+        snatch_guard: SnatchGuard,
     ) -> Result<(UserClosures, bool), WaitIdleError> {
         profiling::scope!("Device::maintain");
         let last_done_index = if maintain.is_wait() {
@@ -417,10 +423,8 @@ impl<A: HalApi> Device<A> {
         };
 
         let mut life_tracker = self.lock_life();
-        let submission_closures = life_tracker.triage_submissions(
-            last_done_index,
-            self.command_allocator.lock().as_mut().unwrap(),
-        );
+        let submission_closures =
+            life_tracker.triage_submissions(last_done_index, &self.command_allocator);
 
         {
             // Normally, `temp_suspected` exists only to save heap
@@ -440,7 +444,8 @@ impl<A: HalApi> Device<A> {
             life_tracker.triage_mapped();
         }
 
-        let mapping_closures = life_tracker.handle_mapping(self.raw(), &self.trackers);
+        let mapping_closures =
+            life_tracker.handle_mapping(self.raw(), &self.trackers, &snatch_guard);
 
         let queue_empty = life_tracker.queue_empty();
 
@@ -467,8 +472,9 @@ impl<A: HalApi> Device<A> {
             }
         }
 
-        // Don't hold the lock while calling release_gpu_resources.
+        // Don't hold the locks while calling release_gpu_resources.
         drop(life_tracker);
+        drop(snatch_guard);
 
         if should_release_gpu_resource {
             self.release_gpu_resources();
@@ -2752,8 +2758,9 @@ impl<A: HalApi> Device<A> {
             label: desc.label.to_hal(self.instance_flags),
             layout: pipeline_layout.raw(),
             stage: hal::ProgrammableStage {
-                entry_point: final_entry_point_name.as_ref(),
                 module: shader_module.raw(),
+                entry_point: final_entry_point_name.as_ref(),
+                constants: desc.stage.constants.as_ref(),
             },
         };
 
@@ -3168,6 +3175,7 @@ impl<A: HalApi> Device<A> {
             hal::ProgrammableStage {
                 module: vertex_shader_module.raw(),
                 entry_point: &vertex_entry_point_name,
+                constants: stage_desc.constants.as_ref(),
             }
         };
 
@@ -3227,6 +3235,7 @@ impl<A: HalApi> Device<A> {
                 Some(hal::ProgrammableStage {
                     module: shader_module.raw(),
                     entry_point: &fragment_entry_point_name,
+                    constants: fragment_state.stage.constants.as_ref(),
                 })
             }
             None => None,
@@ -3472,10 +3481,9 @@ impl<A: HalApi> Device<A> {
                     .map_err(DeviceError::from)?
             };
             drop(guard);
-            let closures = self.lock_life().triage_submissions(
-                submission_index,
-                self.command_allocator.lock().as_mut().unwrap(),
-            );
+            let closures = self
+                .lock_life()
+                .triage_submissions(submission_index, &self.command_allocator);
             assert!(
                 closures.is_empty(),
                 "wait_for_submit is not expected to work with closures"
@@ -3568,6 +3576,10 @@ impl<A: HalApi> Device<A> {
             let _ = texture.destroy();
         }
     }
+
+    pub(crate) fn new_usage_scope(&self) -> UsageScope<'_, A> {
+        UsageScope::new_pooled(&self.usage_scopes, &self.tracker_indices)
+    }
 }
 
 impl<A: HalApi> Device<A> {
@@ -3599,10 +3611,7 @@ impl<A: HalApi> Device<A> {
             log::error!("failed to wait for the device: {error}");
         }
         let mut life_tracker = self.lock_life();
-        let _ = life_tracker.triage_submissions(
-            current_index,
-            self.command_allocator.lock().as_mut().unwrap(),
-        );
+        let _ = life_tracker.triage_submissions(current_index, &self.command_allocator);
         if let Some(device_lost_closure) = life_tracker.device_lost_closure.take() {
             // It's important to not hold the lock while calling the closure.
             drop(life_tracker);

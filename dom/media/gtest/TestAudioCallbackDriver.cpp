@@ -81,7 +81,7 @@ class MockGraphInterface : public GraphInterface {
                 RefPtr<Runnable> aSwitchedRunnable = NS_NewRunnableFunction(
                     "DefaultNoopSwitchedRunnable", [] {})) {
     auto guard = mNextDriver.Lock();
-    MOZ_ASSERT(guard->isNothing());
+    MOZ_RELEASE_ASSERT(guard->isNothing());
     *guard =
         Some(std::make_tuple(std::move(aDriver), std::move(aSwitchedRunnable)));
   }
@@ -252,7 +252,7 @@ class MOZ_STACK_CLASS AutoSetter {
       : mVal(aVal), mNew(aNew), mOld(mVal.exchange(aNew)) {}
   ~AutoSetter() {
     DebugOnly<T> oldNew = mVal.exchange(mOld);
-    MOZ_ASSERT(oldNew == mNew);
+    MOZ_RELEASE_ASSERT(oldNew == mNew);
   }
 };
 #endif
@@ -289,7 +289,8 @@ MOZ_CAN_RUN_SCRIPT_BOUNDARY {
   // Wait for the audio driver to have started the stream before running data
   // callbacks. driver->Start() does a dispatch to the cubeb operation thread
   // and starts the stream there.
-  nsCOMPtr<nsIEventTarget> cubebOpThread = CUBEB_TASK_THREAD;
+  nsCOMPtr<nsIEventTarget> cubebOpThread =
+      CubebUtils::GetCubebOperationThread();
   MOZ_ALWAYS_SUCCEEDS(SyncRunnable::DispatchToThread(
       cubebOpThread, NS_NewRunnableFunction(__func__, [] {})));
 
@@ -421,7 +422,8 @@ MOZ_CAN_RUN_SCRIPT_BOUNDARY {
   // Wait for the audio driver to have started or the DeviceChanged event will
   // be ignored. driver->Start() does a dispatch to the cubeb operation thread
   // and starts the stream there.
-  nsCOMPtr<nsIEventTarget> cubebOpThread = CUBEB_TASK_THREAD;
+  nsCOMPtr<nsIEventTarget> cubebOpThread =
+      CubebUtils::GetCubebOperationThread();
   MOZ_ALWAYS_SUCCEEDS(SyncRunnable::DispatchToThread(
       cubebOpThread, NS_NewRunnableFunction(__func__, [] {})));
 

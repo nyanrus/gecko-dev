@@ -449,6 +449,7 @@ class nsDocumentViewer final : public nsIDocumentViewer,
 
 #ifdef NS_PRINTING
   unsigned mClosingWhilePrinting : 1;
+  unsigned mCloseWindowAfterPrint : 1;
 
 #  if NS_PRINT_PREVIEW
   RefPtr<nsPrintJob> mPrintJob;
@@ -520,6 +521,7 @@ nsDocumentViewer::nsDocumentViewer()
       mInPermitUnloadPrompt(false),
 #ifdef NS_PRINTING
       mClosingWhilePrinting(false),
+      mCloseWindowAfterPrint(false),
 #endif  // NS_PRINTING
       mReloadEncodingSource(kCharsetUninitialized),
       mReloadEncoding(nullptr),
@@ -1143,6 +1145,8 @@ nsDocumentViewer::PermitUnload(PermitUnloadAction aAction,
 
   *aPermitUnload = true;
 
+  NS_ENSURE_STATE(mContainer);
+
   RefPtr<BrowsingContext> bc = mContainer->GetBrowsingContext();
   if (!bc) {
     return NS_OK;
@@ -1224,7 +1228,7 @@ MOZ_CAN_RUN_SCRIPT_BOUNDARY PermitUnloadResult
 nsDocumentViewer::DispatchBeforeUnload() {
   AutoDontWarnAboutSyncXHR disableSyncXHRWarning;
 
-  if (!mDocument || mInPermitUnload || mInPermitUnloadPrompt) {
+  if (!mDocument || mInPermitUnload || mInPermitUnloadPrompt || !mContainer) {
     return eAllowNavigation;
   }
 
@@ -2422,7 +2426,7 @@ NS_IMETHODIMP nsDocumentViewer::CopyLinkLocation() {
   NS_ENSURE_SUCCESS(rv, rv);
 
   // copy the href onto the clipboard
-  return clipboard->CopyString(locationText);
+  return clipboard->CopyString(locationText, mDocument->GetWindowContext());
 }
 
 NS_IMETHODIMP nsDocumentViewer::CopyImage(int32_t aCopyFlags) {
@@ -2432,7 +2436,8 @@ NS_IMETHODIMP nsDocumentViewer::CopyImage(int32_t aCopyFlags) {
   NS_ENSURE_TRUE(node, NS_ERROR_FAILURE);
 
   nsCOMPtr<nsILoadContext> loadContext(mContainer);
-  return nsCopySupport::ImageCopy(node, loadContext, aCopyFlags);
+  return nsCopySupport::ImageCopy(node, loadContext, aCopyFlags,
+                                  mDocument->GetWindowContext());
 }
 
 NS_IMETHODIMP nsDocumentViewer::GetCopyable(bool* aCopyable) {
@@ -2546,6 +2551,8 @@ nsDocumentViewer::ForgetReloadEncoding() {
 MOZ_CAN_RUN_SCRIPT_BOUNDARY NS_IMETHODIMP nsDocumentViewer::GetContentSize(
     int32_t aMaxWidth, int32_t aMaxHeight, int32_t aPrefWidth, int32_t* aWidth,
     int32_t* aHeight) {
+  NS_ENSURE_STATE(mContainer);
+
   RefPtr<BrowsingContext> bc = mContainer->GetBrowsingContext();
   NS_ENSURE_TRUE(bc, NS_ERROR_NOT_AVAILABLE);
 
@@ -3136,6 +3143,20 @@ nsDocumentViewer::GetDoingPrintPreview(bool* aDoingPrintPreview) {
 }
 
 NS_IMETHODIMP
+nsDocumentViewer::GetCloseWindowAfterPrint(bool* aCloseWindowAfterPrint) {
+  NS_ENSURE_ARG_POINTER(aCloseWindowAfterPrint);
+
+  *aCloseWindowAfterPrint = mCloseWindowAfterPrint;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocumentViewer::SetCloseWindowAfterPrint(bool aCloseWindowAfterPrint) {
+  mCloseWindowAfterPrint = aCloseWindowAfterPrint;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDocumentViewer::ExitPrintPreview() {
   NS_ENSURE_TRUE(mPrintJob, NS_ERROR_FAILURE);
 
@@ -3297,15 +3318,23 @@ void nsDocumentViewer::OnDonePrinting() {
       printJob->Destroy();
     }
 
-    // We are done printing, now clean up.
-    //
-    // For non-print-preview jobs, we are actually responsible for cleaning up
-    // our whole <browser> or window (see the OPEN_PRINT_BROWSER code), so gotta
-    // run window.close(), which will take care of this.
-    //
-    // For print preview jobs the front-end code is responsible for cleaning the
-    // UI.
-    if (!printJob->CreatedForPrintPreview()) {
+// We are done printing, now clean up.
+//
+// If the original document to print was not a static clone, we opened a new
+// window and are responsible for cleaning up the whole <browser> or window
+// (see the OPEN_PRINT_BROWSER code, specifically
+// handleStaticCloneCreatedForPrint()), so gotta run window.close(), which
+// will take care of this.
+//
+// Otherwise the front-end code is responsible for cleaning the UI.
+#  ifdef ANDROID
+    // Android doesn't support Content Analysis and prints in a different way,
+    // so use different logic to clean up.
+    bool closeWindowAfterPrint = !printJob->CreatedForPrintPreview();
+#  else
+    bool closeWindowAfterPrint = GetCloseWindowAfterPrint();
+#  endif
+    if (closeWindowAfterPrint) {
       if (mContainer) {
         if (nsCOMPtr<nsPIDOMWindowOuter> win = mContainer->GetWindow()) {
           win->Close();

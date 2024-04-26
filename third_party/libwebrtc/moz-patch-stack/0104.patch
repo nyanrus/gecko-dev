@@ -1,33 +1,28 @@
-From: Andreas Pehrson <apehrson@mozilla.com>
-Date: Fri, 2 Feb 2024 18:43:00 +0000
-Subject: Bug 1878010 - Fix webrtc::VideoCaptureFactory for BSD.
- r=grulja,gaston,webrtc-reviewers,mjf
+From: Jan Grulich <jgrulich@redhat.com>
+Date: Wed, 6 Mar 2024 10:19:00 +0000
+Subject: Bug 1882438 - WebRTC backport: PipeWire camera - use length of device
+ id instead display name r=pehrsons,webrtc-reviewers
 
-Differential Revision: https://phabricator.services.mozilla.com/D200427
-Mercurial Revision: https://hg.mozilla.org/mozilla-central/rev/f890637efe5abc0020fab83ff2224313cd0c8460
+This is a simple backport of an WebRTC upstream change.
+
+Upstream commit: 16ac10d9f75cde959f00df062f544c49941882da
+
+Differential Revision: https://phabricator.services.mozilla.com/D203099
+Mercurial Revision: https://hg.mozilla.org/mozilla-central/rev/b572eb8b39b03f714234afff4bd80b4612439521
 ---
- modules/video_capture/video_capture_factory.cc | 4 ++--
- 1 file changed, 2 insertions(+), 2 deletions(-)
+ modules/video_capture/linux/device_info_pipewire.cc | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
 
-diff --git a/modules/video_capture/video_capture_factory.cc b/modules/video_capture/video_capture_factory.cc
-index e085ac2df8..2790fbbe1c 100644
---- a/modules/video_capture/video_capture_factory.cc
-+++ b/modules/video_capture/video_capture_factory.cc
-@@ -24,7 +24,7 @@ rtc::scoped_refptr<VideoCaptureModule> VideoCaptureFactory::Create(
-     const char* deviceUniqueIdUTF8) {
- // This is only implemented on pure Linux and WEBRTC_LINUX is defined for
- // Android as well
--#if !defined(WEBRTC_LINUX) || defined(WEBRTC_ANDROID)
-+#if (!defined(WEBRTC_LINUX) && !defined(WEBRTC_BSD)) || defined(WEBRTC_ANDROID)
-   return nullptr;
- #else
-   return videocapturemodule::VideoCaptureImpl::Create(options,
-@@ -40,7 +40,7 @@ VideoCaptureModule::DeviceInfo* VideoCaptureFactory::CreateDeviceInfo(
-     VideoCaptureOptions* options) {
- // This is only implemented on pure Linux and WEBRTC_LINUX is defined for
- // Android as well
--#if !defined(WEBRTC_LINUX) || defined(WEBRTC_ANDROID)
-+#if (!defined(WEBRTC_LINUX) && !defined(WEBRTC_BSD)) || defined(WEBRTC_ANDROID)
-   return nullptr;
- #else
-   return videocapturemodule::VideoCaptureImpl::CreateDeviceInfo(options);
+diff --git a/modules/video_capture/linux/device_info_pipewire.cc b/modules/video_capture/linux/device_info_pipewire.cc
+index f9f08a9c27..31d922035b 100644
+--- a/modules/video_capture/linux/device_info_pipewire.cc
++++ b/modules/video_capture/linux/device_info_pipewire.cc
+@@ -96,7 +96,7 @@ int32_t DeviceInfoPipeWire::CreateCapabilityMap(
+       continue;
+ 
+     _captureCapabilities = node.capabilities();
+-    _lastUsedDeviceNameLength = node.display_name().length();
++    _lastUsedDeviceNameLength = node.unique_id().length();
+     _lastUsedDeviceName = static_cast<char*>(
+         realloc(_lastUsedDeviceName, _lastUsedDeviceNameLength + 1));
+     memcpy(_lastUsedDeviceName, deviceUniqueIdUTF8,

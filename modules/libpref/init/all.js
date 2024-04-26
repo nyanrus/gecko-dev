@@ -188,11 +188,12 @@ pref("pdfjs.enableXfa", true);
 // Enable adding an image in a pdf.
 pref("pdfjs.enableStampEditor", true);
 
-// Enable adding an image in a pdf.
+// Enable highlighting in a pdf.
+pref("pdfjs.enableHighlightEditor", true);
 #if defined(EARLY_BETA_OR_EARLIER)
-  pref("pdfjs.enableHighlightEditor", true);
+  pref("pdfjs.enableHighlightFloatingButton", true);
 #else
-  pref("pdfjs.enableHighlightEditor", false);
+  pref("pdfjs.enableHighlightFloatingButton", false);
 #endif
 
 // Disable support for MathML
@@ -343,12 +344,8 @@ pref("media.videocontrols.keyboard-tab-to-all-controls", true);
   #endif
 
   // 770 = DTLS 1.0, 771 = DTLS 1.2, 772 = DTLS 1.3
-pref("media.peerconnection.dtls.version.min", 771);
-#ifdef NIGHTLY_BUILD
+  pref("media.peerconnection.dtls.version.min", 771);
   pref("media.peerconnection.dtls.version.max", 772);
-#else
-  pref("media.peerconnection.dtls.version.max", 771);
-#endif
 
   // These values (aec, agc, and noise) are from:
   // third_party/libwebrtc/modules/audio_processing/include/audio_processing.h
@@ -412,10 +409,6 @@ pref("formhelper.autozoom.force-disable.test-only", false);
 pref("gfx.downloadable_fonts.enabled", true);
 pref("gfx.downloadable_fonts.fallback_delay", 3000);
 pref("gfx.downloadable_fonts.fallback_delay_short", 100);
-
-// disable downloadable font cache so that behavior is consistently
-// the uncached load behavior across pages (useful for testing reflow problems)
-pref("gfx.downloadable_fonts.disable_cache", false);
 
 #ifdef XP_WIN
   pref("gfx.font_rendering.directwrite.use_gdi_table_loading", true);
@@ -639,6 +632,7 @@ pref("toolkit.telemetry.user_characteristics_ping.last_version_sent", 0);
 // the telemetry client id (which is not sent in this ping), it is cleared when a
 // user opts-out of telemetry, it is set upon first telemetry submission
 pref("toolkit.telemetry.user_characteristics_ping.uuid", "");
+pref("toolkit.telemetry.user_characteristics_ping.logLevel", "Warn");
 
 // AsyncShutdown delay before crashing in case of shutdown freeze
 // ASan, TSan and code coverage builds can be considerably slower. Extend the
@@ -943,7 +937,7 @@ pref("javascript.options.mem.max", -1);
 
 // JSGC_MIN_NURSERY_BYTES / JSGC_MAX_NURSERY_BYTES
 pref("javascript.options.mem.nursery.min_kb", 256);
-pref("javascript.options.mem.nursery.max_kb", 16384);
+pref("javascript.options.mem.nursery.max_kb", 65536);
 
 // JSGC_MODE
 pref("javascript.options.mem.gc_per_zone", true);
@@ -958,6 +952,11 @@ pref("javascript.options.mem.gc_incremental_slice_ms", 5);
 
 // JSGC_COMPACTING_ENABLED
 pref("javascript.options.mem.gc_compacting", true);
+
+#ifdef NIGHTLY_BUILD
+// JSGC_SEMISPACE_NURSERY_ENABLED
+pref("javascript.options.mem.gc_experimental_semispace_nursery", false);
+#endif
 
 // JSGC_PARALLEL_MARKING_ENABLED
 // This only applies to the main runtime and does not affect workers.
@@ -978,6 +977,9 @@ pref("javascript.options.mem.gc_parallel_marking_threshold_mb", 16);
 #elif defined(XP_UNIX)
 pref("javascript.options.mem.gc_parallel_marking_threshold_mb", 16);
 #endif
+
+// JSGC_MAX_MARKING_THREADS
+pref("javascript.options.mem.gc_max_parallel_marking_threads", 2);
 
 // JSGC_HIGH_FREQUENCY_TIME_LIMIT
 pref("javascript.options.mem.gc_high_frequency_time_limit_ms", 1000);
@@ -1094,8 +1096,6 @@ pref("network.protocol-handler.external.disk", false);
 pref("network.protocol-handler.external.disks", false);
 pref("network.protocol-handler.external.afp", false);
 pref("network.protocol-handler.external.moz-icon", false);
-pref("network.protocol-handler.external.firefox-bridge", false);
-pref("network.protocol-handler.external.firefox-private-bridge", false);
 
 // Don't allow  external protocol handlers for common typos
 pref("network.protocol-handler.external.ttp", false);  // http
@@ -1195,7 +1195,7 @@ pref("network.http.redirection-limit", 20);
 // NOTE: support for "compress" has been disabled per bug 196406.
 // NOTE: separate values with comma+space (", "): see bug 576033
 pref("network.http.accept-encoding", "gzip, deflate");
-pref("network.http.accept-encoding.secure", "gzip, deflate, br");
+pref("network.http.accept-encoding.secure", "gzip, deflate, br, zstd");
 
 // Prompt for redirects resulting in unsafe HTTP requests
 pref("network.http.prompt-temp-redirect", false);
@@ -1241,7 +1241,11 @@ pref("network.http.network-changed.timeout", 5);
 
 // The maximum number of current global half open sockets allowable
 // when starting a new speculative connection.
-pref("network.http.speculative-parallel-limit", 6);
+#ifdef ANDROID
+  pref("network.http.speculative-parallel-limit", 6);
+#else
+  pref("network.http.speculative-parallel-limit", 20);
+#endif
 
 // Whether or not to block requests for non head js/css items (e.g. media)
 // while those elements load.
@@ -1291,9 +1295,6 @@ pref("network.http.tcp_keepalive.long_lived_idle_time", 600);
 pref("network.http.enforce-framing.http1", false); // should be named "strict"
 pref("network.http.enforce-framing.soft", true);
 pref("network.http.enforce-framing.strict_chunked_encoding", true);
-
-// Max size, in bytes, for received HTTP response header.
-pref("network.http.max_response_header_size", 393216);
 
 // The ratio of the transaction count for the focused window and the count of
 // all available active connections.
@@ -3479,12 +3480,23 @@ pref("browser.search.removeEngineInfobar.enabled", true);
 // Enables a new search configuration style with no functional changes for the
 // user. This is solely intended as a rollout button - it will go away once the
 // new configuration has been rolled out.
+// Whether search-config-v2 is enabled.
+#ifdef NIGHTLY_BUILD
+pref("browser.search.newSearchConfig.enabled", true);
+#else
 pref("browser.search.newSearchConfig.enabled", false);
+#endif
 
 // GMPInstallManager prefs
 
 // User-settable override to media.gmp-manager.url for testing purposes.
 //pref("media.gmp-manager.url.override", "");
+
+// When |media.gmp-manager.allowLocalSources| is true, we will allow falling
+// back to using the plugin configurations distributed with Firefox to update
+// or install plugins. This fallback is only used when we fail to get an
+// acceptable configuration via |media.gmp-manager.url|.
+pref("media.gmp-manager.allowLocalSources", true);
 
 // Update service URL for GMP install/updates:
 pref("media.gmp-manager.url", "https://aus5.mozilla.org/update/3/GMP/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
@@ -3559,7 +3571,19 @@ pref("reader.line_height", 4);
 pref("reader.color_scheme", "auto");
 
 // Color scheme values available in reader mode UI.
-pref("reader.color_scheme.values", "[\"light\",\"dark\",\"sepia\",\"auto\"]");
+pref("reader.color_scheme.values", "[\"auto\",\"light\",\"dark\",\"sepia\",\"contrast\",\"gray\"]");
+
+// Determines if updated color theme menu is enabled in reader mode.
+pref("reader.colors_menu.enabled", false);
+
+// The custom color scheme options in reader colors menu.
+pref("reader.custom_colors.foreground", "");
+pref("reader.custom_colors.background", "");
+
+pref("reader.custom_colors.unvisited-links", "");
+pref("reader.custom_colors.visited-links", "");
+
+pref("reader.custom_colors.selection-highlight", "");
 
 // The font type in reader (sans-serif, serif)
 pref("reader.font_type", "sans-serif");
@@ -3657,6 +3681,12 @@ pref("browser.translations.chaos.timeoutMS", 0);
 pref("browser.ml.enable", false);
 // Set to "All" to see all logs, which are useful for debugging.
 pref("browser.ml.logLevel", "Error");
+// Model hub root URL used to download models.
+pref("browser.ml.modelHubRootUrl", "https://model-hub.mozilla.org/");
+// Model URL template
+pref("browser.ml.modelHubUrlTemplate", "{model}/{revision}");
+// Model cache timeout in ms
+pref("browser.ml.modelCacheTimeout", 120000);
 
 // When a user cancels this number of authentication dialogs coming from
 // a single web page in a row, all following authentication dialogs will
@@ -3665,10 +3695,6 @@ pref("browser.ml.logLevel", "Error");
 // To disable all auth prompting, set the limit to 0.
 // To disable blocking of auth prompts, set the limit to -1.
 pref("prompts.authentication_dialog_abuse_limit", 2);
-
-// The prompt type to use for http auth prompts
-// content: 1, tab: 2, window: 3
-pref("prompts.modalType.httpAuth", 2);
 
 pref("dom.payments.request.supportedRegions", "US,CA");
 

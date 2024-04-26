@@ -158,7 +158,7 @@ export var UrlbarTestUtils = {
         lazy.UrlbarPrefs.get("trimURLs") &&
         value != lazy.BrowserUIUtils.trimURL(value)
       ) {
-        window.gURLBar._setValue(value, false);
+        window.gURLBar._setValue(value);
         fireInputEvent = true;
       } else {
         window.gURLBar.value = value;
@@ -1043,9 +1043,11 @@ export var UrlbarTestUtils = {
    * Removes the scheme from an url according to user prefs.
    *
    * @param {string} url
-   *  The url that is supposed to be sanitizied.
-   * @param {{removeSingleTrailingSlash: (boolean)}} options
-   *    removeSingleTrailingSlash: Remove trailing slash, when trimming enabled.
+   *  The url that is supposed to be trimmed.
+   * @param {object} [options]
+   *  Options for the trimming.
+   * @param {boolean} [options.removeSingleTrailingSlash]
+   *    Remove trailing slash, when trimming enabled.
    * @returns {string}
    *  The sanitized URL.
    */
@@ -1060,14 +1062,12 @@ export var UrlbarTestUtils = {
         lazy.BrowserUIUtils.removeSingleTrailingSlashFromURL(sanitizedURL);
     }
 
+    // Also remove emphasis markers if present.
     if (lazy.UrlbarPrefs.get("trimHttps")) {
-      sanitizedURL = sanitizedURL.replace("https://", "");
+      sanitizedURL = sanitizedURL.replace(/^<?https:\/\/>?/, "");
     } else {
-      sanitizedURL = sanitizedURL.replace("http://", "");
+      sanitizedURL = sanitizedURL.replace(/^<?http:\/\/>?/, "");
     }
-
-    // Remove empty emphasis markers in case the protocol was trimmed.
-    sanitizedURL = sanitizedURL.replace("<>", "");
 
     return sanitizedURL;
   },
@@ -1315,10 +1315,7 @@ export var UrlbarTestUtils = {
       // Set most of the string directly instead of going through sendString,
       // so that we don't make life unnecessarily hard for consumers by
       // possibly starting multiple searches.
-      win.gURLBar._setValue(
-        text.substr(0, text.length - 1),
-        false /* allowTrim = */
-      );
+      win.gURLBar._setValue(text.substr(0, text.length - 1));
     }
     this.EventUtils.sendString(text.substr(-1, 1), win);
   },
@@ -1490,7 +1487,7 @@ class TestProvider extends UrlbarProvider {
    * @param {Function} [options.onSelection]
    *   If given, a function that will be called when
    *   {@link UrlbarView.#selectElement} method is called.
-   * @param {Function} [options.onEngagement]
+   * @param {Function} [options.onLegacyEngagement]
    *   If given, a function that will be called when engagement.
    * @param {Function} [options.delayResultsPromise]
    *   If given, we'll await on this before returning results.
@@ -1503,7 +1500,7 @@ class TestProvider extends UrlbarProvider {
     addTimeout = 0,
     onCancel = null,
     onSelection = null,
-    onEngagement = null,
+    onLegacyEngagement = null,
     delayResultsPromise = null,
   } = {}) {
     if (delayResultsPromise && addTimeout) {
@@ -1520,7 +1517,7 @@ class TestProvider extends UrlbarProvider {
     this._type = type;
     this._onCancel = onCancel;
     this._onSelection = onSelection;
-    this._onEngagement = onEngagement;
+    this._onLegacyEngagement = onLegacyEngagement;
 
     // As this has been a common source of mistakes, auto-upgrade the provider
     // type to heuristic if any result is heuristic.
@@ -1574,8 +1571,8 @@ class TestProvider extends UrlbarProvider {
     this._onSelection?.(result, element);
   }
 
-  onEngagement(state, queryContext, details, controller) {
-    this._onEngagement?.(state, queryContext, details, controller);
+  onLegacyEngagement(state, queryContext, details, controller) {
+    this._onLegacyEngagement?.(state, queryContext, details, controller);
   }
 }
 

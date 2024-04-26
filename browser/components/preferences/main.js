@@ -430,19 +430,29 @@ var gMainPane = {
         "command",
         gMainPane.onWindowsLaunchOnLoginChange
       );
-      NimbusFeatures.windowsLaunchOnLogin.recordExposureEvent({
-        once: true,
-      });
       // We do a check here for startWithLastProfile as we could
       // have disabled the pref for the user before they're ever
       // exposed to the experiment on a new profile.
+      // If we're using MSIX, we don't show the checkbox as MSIX
+      // can't write to the registry.
       if (
-        NimbusFeatures.windowsLaunchOnLogin.getVariable("enabled") &&
         Cc["@mozilla.org/toolkit/profile-service;1"].getService(
           Ci.nsIToolkitProfileService
-        ).startWithLastProfile
+        ).startWithLastProfile &&
+        !Services.sysinfo.getProperty("hasWinPackageId", false)
       ) {
-        document.getElementById("windowsLaunchOnLoginBox").hidden = false;
+        NimbusFeatures.windowsLaunchOnLogin.recordExposureEvent({
+          once: true,
+        });
+
+        if (
+          Services.prefs.getBoolPref(
+            "browser.startup.windowsLaunchOnLogin.enabled",
+            false
+          )
+        ) {
+          document.getElementById("windowsLaunchOnLoginBox").hidden = false;
+        }
       }
     }
     gMainPane.updateBrowserStartupUI =
@@ -1130,7 +1140,7 @@ var gMainPane = {
           this.markAllDownloadPhases("downloaded");
         } catch (error) {
           TranslationsView.showError(
-            "translations-manage-error-install",
+            "translations-manage-error-download",
             error
           );
           await this.reloadDownloadPhases();
@@ -1167,7 +1177,7 @@ var gMainPane = {
             this.updateDownloadPhase(langTag, "downloaded");
           } catch (error) {
             TranslationsView.showError(
-              "translations-manage-error-install",
+              "translations-manage-error-download",
               error
             );
             this.updateDownloadPhase(langTag, "uninstalled");
@@ -1221,7 +1231,7 @@ var gMainPane = {
 
           document.l10n.setAttributes(
             downloadButton,
-            "translations-manage-language-install-button"
+            "translations-manage-language-download-button"
           );
           document.l10n.setAttributes(
             deleteButton,
@@ -1918,6 +1928,11 @@ var gMainPane = {
     if (
       Services.prefs.getBoolPref("browser.translations.newSettingsUI.enable")
     ) {
+      const translationsSettings = document.getElementById(
+        "translations-settings-page"
+      );
+      translationsSettings.setAttribute("data-hidden-from-search", "false");
+      translationsSettings.hidden = false;
       gotoPref("translations");
     } else {
       gSubDialog.open(
@@ -4197,7 +4212,7 @@ const AppearanceChooser = {
           e.preventDefault();
           break;
         case "web-appearance-manage-themes-link":
-          window.browsingContext.topChromeWindow.BrowserOpenAddonsMgr(
+          window.browsingContext.topChromeWindow.BrowserAddonUI.openAddonsMgr(
             "addons://list/theme"
           );
           e.preventDefault();

@@ -120,7 +120,7 @@ class OwningExternalOrWindowProxy;
 class Promise;
 class PostMessageEvent;
 struct RequestInit;
-class RequestOrUSVString;
+class RequestOrUTF8String;
 class SharedWorker;
 class Selection;
 struct SizeToContentConstraints;
@@ -671,7 +671,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   already_AddRefed<mozilla::dom::cache::CacheStorage> GetCaches(
       mozilla::ErrorResult& aRv);
   already_AddRefed<mozilla::dom::Promise> Fetch(
-      const mozilla::dom::RequestOrUSVString& aInput,
+      const mozilla::dom::RequestOrUTF8String& aInput,
       const mozilla::dom::RequestInit& aInit,
       mozilla::dom::CallerType aCallerType, mozilla::ErrorResult& aRv);
   MOZ_CAN_RUN_SCRIPT void Print(mozilla::ErrorResult& aError);
@@ -728,6 +728,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
             mozilla::ErrorResult& aError);
   void Btoa(const nsAString& aBinaryData, nsAString& aAsciiBase64String,
             mozilla::ErrorResult& aError);
+
+  void MaybeNotifyStorageKeyUsed();
+
   mozilla::dom::Storage* GetSessionStorage(mozilla::ErrorResult& aError);
   mozilla::dom::Storage* GetLocalStorage(mozilla::ErrorResult& aError);
   mozilla::dom::Selection* GetSelection(mozilla::ErrorResult& aError);
@@ -1388,6 +1391,11 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   // instead.
   mozilla::Maybe<mozilla::StorageAccess> mStorageAllowedCache;
   uint32_t mStorageAllowedReasonCache;
+
+  // When window associated storage is accessed we need to notify the parent
+  // process. This flag is used to ensure we only do it once per window
+  // lifetime.
+  bool hasNotifiedStorageKeyUsed{false};
 
   RefPtr<mozilla::dom::DebuggerNotificationManager>
       mDebuggerNotificationManager;

@@ -69,7 +69,7 @@ const PREF_URLBAR_DEFAULTS = new Map([
 
   // Whether to show a link for using the search functionality provided by the
   // active view if the the view utilizes OpenSearch.
-  ["contextualSearch.enabled", false],
+  ["contextualSearch.enabled", true],
 
   // Whether using `ctrl` when hitting return/enter in the URL bar
   // (or clicking 'go') should prefix 'www.' and suffix
@@ -178,7 +178,7 @@ const PREF_URLBAR_DEFAULTS = new Map([
 
   // If disabled, QuickActions will not be included in either the default search
   // mode or the QuickActions search mode.
-  ["quickactions.enabled", false],
+  ["quickactions.enabled", true],
 
   // Whether we will match QuickActions within a phrase and not only a prefix.
   ["quickactions.matchInPhrase", true],
@@ -187,9 +187,6 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // matching actions. Setting this to 0 will show the actions in the
   // zero prefix state.
   ["quickactions.minimumSearchString", 3],
-
-  // Show multiple actions in a random order.
-  ["quickactions.randomOrderActions", false],
 
   // Whether we show the Actions section in about:preferences.
   ["quickactions.showPrefs", false],
@@ -322,11 +319,13 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // homepage is opened.
   ["searchTips.test.ignoreShowLimits", false],
 
+  // Feature gate pref for secondary actions being shown in the urlbar.
+  ["secondaryActions.featureGate", false],
+
   // Whether to show each local search shortcut button in the view.
   ["shortcuts.bookmarks", true],
   ["shortcuts.tabs", true],
   ["shortcuts.history", true],
-  ["shortcuts.quickactions", false],
 
   // Boolean to determine if the providers defined in `exposureResults`
   // should be displayed in search results. This can be set by a
@@ -464,6 +463,10 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // The index where we show unit conversion results.
   ["unitConversion.suggestedIndex", 1],
 
+  // Untrim url, when urlbar is focused.
+  // Note: This pref will be removed once the feature is stable.
+  ["untrimOnUserInteraction.featureGate", false],
+
   // Controls the empty search behavior in Search Mode:
   //  0 - Show nothing
   //  1 - Show search history
@@ -485,9 +488,9 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // Feature gate pref for Yelp suggestions in the urlbar.
   ["yelp.featureGate", false],
 
-  // The minimum number of characters the user must type to trigger a Yelp
-  // suggestion (excluding full keywords that are shorter than this).
-  ["yelp.minKeywordLength", 5],
+  // The minimum prefix length of a Yelp keyword the user must type to trigger
+  // the suggestion. 0 means the min length should be taken from Nimbus.
+  ["yelp.minKeywordLength", 0],
 
   // Whether Yelp suggestions should be shown as top picks. This is a fallback
   // pref for the `yelpSuggestPriority` Nimbus variable.
@@ -526,6 +529,7 @@ const NIMBUS_DEFAULTS = {
   weatherKeywordsMinimumLength: 0,
   weatherKeywordsMinimumLengthCap: 0,
   weatherSimpleUI: false,
+  yelpMinKeywordLength: 0,
 };
 
 // Maps preferences under browser.urlbar.suggest to behavior names, as defined
@@ -1506,12 +1510,28 @@ class Preferences {
         return this.shouldHandOffToSearchModePrefs.some(
           prefName => !this.get(prefName)
         );
-      case "autoFillAdaptiveHistoryUseCountThreshold":
+      case "autoFillAdaptiveHistoryUseCountThreshold": {
         const nimbusValue =
           this._nimbus.autoFillAdaptiveHistoryUseCountThreshold;
         return nimbusValue === undefined
           ? this.get("autoFill.adaptiveHistory.useCountThreshold")
           : parseFloat(nimbusValue);
+      }
+      case "potentialExposureKeywords": {
+        // Get the keywords array from Nimbus or prefs and convert it to a Set.
+        // If the value comes from Nimbus, it will already be an array. If it
+        // comes from prefs, it should be a stringified array.
+        let value = this._readPref(pref);
+        if (typeof value == "string") {
+          try {
+            value = JSON.parse(value);
+          } catch (e) {}
+        }
+        if (!Array.isArray(value)) {
+          value = null;
+        }
+        return new Set(value);
+      }
     }
     return this._readPref(pref);
   }

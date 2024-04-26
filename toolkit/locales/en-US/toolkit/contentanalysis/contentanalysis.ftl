@@ -20,8 +20,12 @@ contentanalysis-slow-agent-dialog-body-clipboard = { $agent } is reviewing what 
 # Variables:
 #   $agent - The name of the DLP agent doing the analysis
 contentanalysis-slow-agent-dialog-body-dropped-text = { $agent } is reviewing the text you dropped against your organization’s data policies. This may take a moment.
+# Variables:
+#   $agent - The name of the DLP agent doing the analysis
+contentanalysis-slow-agent-dialog-body-print = { $agent } is reviewing what you printed against your organization’s data policies. This may take a moment.
 contentanalysis-operationtype-clipboard = clipboard
 contentanalysis-operationtype-dropped-text = dropped text
+contentanalysis-operationtype-print = print
 #   $filename - The filename associated with the request, such as "aFile.txt"
 contentanalysis-customdisplaystring-description = upload of “{ $filename }”
 
@@ -42,8 +46,28 @@ contentanalysis-genericresponse-message = Content Analysis responded with { $res
 #   $content - Description of the content being blocked, such as "clipboard" or "aFile.txt"
 contentanalysis-block-message = Your organization uses data-loss prevention software that has blocked this content: { $content }.
 # Variables:
+#   $agent - The name of the DLP agent doing the analysis
 #   $content - Description of the content being blocked, such as "clipboard" or "aFile.txt"
-contentanalysis-error-message = An error occurred in communicating with the data-loss prevention software. Transfer denied for resource: { $content }.
+contentanalysis-unspecified-error-message = An error occurred in communicating with { $agent }. Transfer denied for resource: { $content }.
+# Variables:
+#   $agent - The name of the DLP agent doing the analysis
+#   $content - Description of the content being blocked, such as "clipboard" or "aFile.txt"
+contentanalysis-no-agent-connected-message = Unable to connect to { $agent }. Transfer denied for resource: { $content }.
+# Variables:
+#   $agent - The name of the DLP agent doing the analysis
+#   $content - Description of the content being blocked, such as "clipboard" or "aFile.txt"
+contentanalysis-invalid-agent-signature-message = Failed signature verification for { $agent }. Transfer denied for resource: { $content }.
+
+contentanalysis-block-dialog-title-upload-file = You’re not permitted to upload this file
+# Variables:
+#   $filename - Name of the file that was blocked, such as "aFile.txt"
+contentanalysis-block-dialog-body-upload-file = Under your organization’s data protection policies, you’re not permitted to upload the file “{ $filename }”. Contact your administrator for more info.
+contentanalysis-block-dialog-title-clipboard = You’re not permitted to paste this content
+contentanalysis-block-dialog-body-clipboard = Under your organization’s data protection policies, you’re not permitted to paste this content. Contact your administrator for more info.
+contentanalysis-block-dialog-title-dropped-text = You’re not permitted to drop this content
+contentanalysis-block-dialog-body-dropped-text = Under your organization’s data protection policies, you’re not permitted to drag and drop this content. Contact your administrator for more info.
+contentanalysis-block-dialog-title-print = You’re not permitted to print this document
+contentanalysis-block-dialog-body-print = Under your organization’s data protection policies, you’re not permitted to print this document. Contact your administrator for more info.
 
 contentanalysis-inprogress-quit-title = Quit { -brand-shorter-name }?
 contentanalysis-inprogress-quit-message = Several actions are in progress. If you quit { -brand-shorter-name }, these actions will not be completed.

@@ -520,8 +520,13 @@ enum class NativeGetPropKind {
 
 static NativeGetPropKind IsCacheableGetPropCall(NativeObject* obj,
                                                 NativeObject* holder,
-                                                PropertyInfo prop) {
+                                                PropertyInfo prop,
+                                                jsbytecode* pc = nullptr) {
   MOZ_ASSERT(IsCacheableProtoChain(obj, holder));
+
+  if (pc && JSOp(*pc) == JSOp::GetBoundName) {
+    return NativeGetPropKind::None;
+  }
 
   if (!prop.isAccessorProperty()) {
     return NativeGetPropKind::None;
@@ -615,7 +620,7 @@ static NativeGetPropKind CanAttachNativeGetProp(JSContext* cx, JSObject* obj,
       return NativeGetPropKind::Slot;
     }
 
-    return IsCacheableGetPropCall(nobj, *holder, propInfo->ref());
+    return IsCacheableGetPropCall(nobj, *holder, propInfo->ref(), pc);
   }
 
   if (!prop.isFound()) {
@@ -1194,7 +1199,8 @@ static ObjOperandId GuardAndLoadWindowProxyWindow(CacheIRWriter& writer,
                                                   ObjOperandId objId,
                                                   GlobalObject* windowObj) {
   writer.guardClass(objId, GuardClassKind::WindowProxy);
-  ObjOperandId windowObjId = writer.loadWrapperTarget(objId);
+  ObjOperandId windowObjId = writer.loadWrapperTarget(objId,
+                                                      /*fallible = */ false);
   writer.guardSpecificObject(windowObjId, windowObj);
   return windowObjId;
 }
@@ -1352,7 +1358,8 @@ AttachDecision GetPropIRGenerator::tryAttachCrossCompartmentWrapper(
   writer.guardHasProxyHandler(objId, Wrapper::wrapperHandler(obj));
 
   // Load the object wrapped by the CCW
-  ObjOperandId wrapperTargetId = writer.loadWrapperTarget(objId);
+  ObjOperandId wrapperTargetId =
+      writer.loadWrapperTarget(objId, /*fallible = */ false);
 
   // If the compartment of the wrapped object is different we should fail.
   writer.guardCompartment(wrapperTargetId, wrappedTargetGlobal,
@@ -1463,7 +1470,8 @@ AttachDecision GetPropIRGenerator::tryAttachXrayCrossCompartmentWrapper(
   writer.guardHasProxyHandler(objId, GetProxyHandler(obj));
 
   // Load the object wrapped by the CCW
-  ObjOperandId wrapperTargetId = writer.loadWrapperTarget(objId);
+  ObjOperandId wrapperTargetId =
+      writer.loadWrapperTarget(objId, /*fallible = */ false);
 
   // Test the wrapped object's class. The properties held by xrays or their
   // prototypes will be invariant for objects of a given class, except for
@@ -1573,9 +1581,9 @@ AttachDecision GetPropIRGenerator::tryAttachScriptedProxy(
 
   writer.guardIsProxy(objId);
   writer.guardHasProxyHandler(objId, &ScriptedProxyHandler::singleton);
-  ValOperandId handlerValId = writer.loadScriptedProxyHandler(objId);
-  ObjOperandId handlerObjId = writer.guardToObject(handlerValId);
-  ObjOperandId targetObjId = writer.loadWrapperTarget(objId);
+  ObjOperandId handlerObjId = writer.loadScriptedProxyHandler(objId);
+  ObjOperandId targetObjId =
+      writer.loadWrapperTarget(objId, /*fallible =*/true);
 
   writer.guardIsNativeObject(targetObjId);
 
@@ -3467,7 +3475,7 @@ AttachDecision GetNameIRGenerator::tryAttachGlobalNameGetter(ObjOperandId objId,
 
   GlobalObject* global = &globalLexical->global();
 
-  NativeGetPropKind kind = IsCacheableGetPropCall(global, holder, *prop);
+  NativeGetPropKind kind = IsCacheableGetPropCall(global, holder, *prop, pc_);
   if (kind != NativeGetPropKind::NativeGetter &&
       kind != NativeGetPropKind::ScriptedGetter) {
     return AttachDecision::NoAction;
@@ -10300,7 +10308,7 @@ AttachDecision CallIRGenerator::tryAttachFunCall(HandleFunction callee) {
     writer.guardNotClassConstructor(thisObjId);
 
     if (isScripted) {
-      writer.guardFunctionHasJitEntry(thisObjId, /*isConstructing =*/false);
+      writer.guardFunctionHasJitEntry(thisObjId);
       writer.callScriptedFunction(thisObjId, argcId, targetFlags,
                                   ClampFixedArgc(argc_));
     } else {
@@ -11260,7 +11268,7 @@ AttachDecision CallIRGenerator::tryAttachFunApply(HandleFunction calleeFunc) {
 
     if (isScripted) {
       // Guard that function is scripted.
-      writer.guardFunctionHasJitEntry(thisObjId, /*constructing =*/false);
+      writer.guardFunctionHasJitEntry(thisObjId);
       writer.callScriptedFunction(thisObjId, argcId, targetFlags, fixedArgc);
     } else {
       // Guard that function is native.
@@ -12026,7 +12034,7 @@ void CallIRGenerator::emitCallScriptedGuards(ObjOperandId calleeObjId,
   } else {
     // Guard that object is a scripted function
     writer.guardClass(calleeObjId, GuardClassKind::JSFunction);
-    writer.guardFunctionHasJitEntry(calleeObjId, isConstructing);
+    writer.guardFunctionHasJitEntry(calleeObjId);
 
     if (isConstructing) {
       // If callee is not a constructor, we have to throw.

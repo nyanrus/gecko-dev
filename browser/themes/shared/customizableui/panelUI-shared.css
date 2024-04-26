@@ -33,7 +33,7 @@
 
   --panel-and-palette-icon-size: 16px;
 
-  &:not(:-moz-lwtheme) {
+  &:not([lwtheme]) {
     --panel-separator-zap-gradient: linear-gradient(90deg, #9059FF 0%, #FF4AA2 52.08%, #FFBD4F 100%);
   }
 
@@ -172,7 +172,6 @@ menupopup {
 
 panelview {
   flex-direction: column;
-  background: var(--arrowpanel-background);
   padding: 0;
 
   /* Prevent a scrollbar from appearing while the animation for transitioning from
@@ -1300,7 +1299,7 @@ panelview .toolbarbutton-1 {
   }
 }
 
-.PanelUI-remotetabs-clientcontainer > toolbarbutton[itemtype="tab"],
+.PanelUI-tabitem-container > toolbarbutton[itemtype="tab"],
 #PanelUI-historyItems > toolbarbutton {
   list-style-image: url("chrome://global/skin/icons/defaultFavicon.svg");
   -moz-context-properties: fill;
@@ -1310,7 +1309,7 @@ panelview .toolbarbutton-1 {
 #fxa-menu-account-fxa-avatar,
 #appMenu-fxa-label > .toolbarbutton-icon,
 #PanelUI-containersItems > .subviewbutton > .toolbarbutton-icon,
-.PanelUI-remotetabs-clientcontainer > toolbarbutton[itemtype="tab"] > .toolbarbutton-icon,
+.PanelUI-tabitem-container > toolbarbutton[itemtype="tab"] > .toolbarbutton-icon,
 #PanelUI-recentlyClosedWindows > toolbarbutton > .toolbarbutton-icon,
 #PanelUI-recentlyClosedTabs > toolbarbutton > .toolbarbutton-icon,
 #PanelUI-historyItems > toolbarbutton > .toolbarbutton-icon {
@@ -1322,6 +1321,15 @@ panelview .toolbarbutton-1 {
   min-width: 0;
 }
 
+.PanelUI-tabitem-container > toolbarbutton[itemtype="tab"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.remotetabs-close {
+  width: 18px;
+  margin-inline-end: 4px;
+}
 #PanelUI-fxa-menu-account-settings-button > .toolbarbutton-icon {
   border-radius: 50%;
 }
@@ -1655,13 +1663,13 @@ radiogroup:focus-visible > .subviewradio[focused="true"] {
 }
 
 #protections-popup {
-  #messaging-system-message-container {
+  #info-message-container {
     height: 260px;
     overflow: hidden;
     transition: margin-bottom .25s;
   }
 
-  #messaging-system-message-container[disabled] {
+  #info-message-container[disabled] {
     /* Offset the height when hidden. This makes the panel content
     * cover the info message and reveal it as it slides down, rather
     * than the info message growing in height. */
@@ -1669,7 +1677,7 @@ radiogroup:focus-visible > .subviewradio[focused="true"] {
    pointer-events: none;
  }
 
-  #messaging-system-message-container[disabled] #protections-popup-message {
+  #info-message-container[disabled] #protections-popup-message {
     opacity: 0;
   }
 }
@@ -2122,7 +2130,7 @@ panelview {
 
   &.sent-view {
     @media not (prefers-contrast) {
-      background-color: var(--color-background-success);
+      background-color: var(--background-color-success);
     }
 
     > .panel-header {
@@ -2179,4 +2187,10 @@ panelview {
   align-items: center;
   padding: var(--space-xxlarge) 0 var(--space-medium);
   gap: var(--space-small);
+}
+
+/* ----- Content Analysis indicator panel ----- */
+
+#content-analysis-panel-container {
+  padding: 8px;
 }

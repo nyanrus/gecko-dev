@@ -19,6 +19,9 @@ const PDF_VIEWER_WEB_PAGE = "resource://pdf.js/web/viewer.html";
 const MAX_NUMBER_OF_PREFS = 50;
 const PDF_CONTENT_TYPE = "application/pdf";
 
+// Preferences
+const caretBrowsingModePref = "accessibility.browsewithcaret";
+
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 
@@ -178,6 +181,45 @@ PdfDataListener.prototype = {
   },
 };
 
+class PrefObserver {
+  #domWindow;
+
+  constructor(domWindow) {
+    this.#domWindow = domWindow;
+    this.#init();
+  }
+
+  #init() {
+    Services.prefs.addObserver(
+      caretBrowsingModePref,
+      this,
+      /* aHoldWeak = */ true
+    );
+  }
+
+  observe(_aSubject, aTopic, aPrefName) {
+    if (aTopic != "nsPref:changed") {
+      return;
+    }
+
+    const actor = getActor(this.#domWindow);
+    if (!actor) {
+      return;
+    }
+    const eventName = "updatedPreference";
+    switch (aPrefName) {
+      case caretBrowsingModePref:
+        actor.dispatchEvent(eventName, {
+          name: "supportsCaretBrowsingMode",
+          value: Services.prefs.getBoolPref(caretBrowsingModePref),
+        });
+        break;
+    }
+  }
+
+  QueryInterface = ChromeUtils.generateQI([Ci.nsISupportsWeakReference]);
+}
+
 /**
  * All the privileged actions.
  */
@@ -187,6 +229,7 @@ class ChromeActions {
     this.contentDispositionFilename = contentDispositionFilename;
     this.sandbox = null;
     this.unloadListener = null;
+    this.observer = new PrefObserver(domWindow);
   }
 
   createSandbox(data, sendResponse) {
@@ -253,7 +296,7 @@ class ChromeActions {
     }
   }
 
-  download(data, sendResponse) {
+  download(data) {
     const { originalUrl, options } = data;
     const blobUrl = data.blobUrl || originalUrl;
     let { filename } = data;
@@ -300,7 +343,7 @@ class ChromeActions {
         Services.prefs.getIntPref("mousewheel.with_meta.action") === 3,
       supportsPinchToZoom: Services.prefs.getBoolPref("apz.allow_zooming"),
       supportsCaretBrowsingMode: Services.prefs.getBoolPref(
-        "accessibility.browsewithcaret"
+        caretBrowsingModePref
       ),
     };
   }
@@ -318,7 +361,7 @@ class ChromeActions {
     actor.sendAsyncMessage("PDFJS:Parent:getNimbus");
     Services.obs.addObserver(
       {
-        observe(aSubject, aTopic, aData) {
+        observe(aSubject, aTopic) {
           if (aTopic === "pdfjs-getNimbus") {
             Services.obs.removeObserver(this, aTopic);
             sendResponse(aSubject && JSON.stringify(aSubject.wrappedJSObject));
@@ -502,7 +545,7 @@ class RangedChromeActions extends ChromeActions {
       }
     };
     var getXhr = function getXhr() {
-      var xhr = new XMLHttpRequest();
+      var xhr = new XMLHttpRequest({ mozAnon: false });
       xhr.addEventListener("readystatechange", xhr_onreadystatechange);
       return xhr;
     };
@@ -747,7 +790,7 @@ PdfStreamConverter.prototype = {
    */
 
   // nsIStreamConverter::convert
-  convert(aFromStream, aFromType, aToType, aCtxt) {
+  convert() {
     throw Components.Exception("", Cr.NS_ERROR_NOT_IMPLEMENTED);
   },
 
@@ -1020,7 +1063,7 @@ PdfStreamConverter.prototype = {
     // request(aRequest) below so we don't overwrite the original channel and
     // trigger an assertion.
     var proxy = {
-      onStartRequest(request) {
+      onStartRequest() {
         listener.onStartRequest(aRequest);
       },
       onDataAvailable(request, inputStream, offset, count) {

@@ -51,7 +51,8 @@ class ProviderClipboard extends UrlbarProvider {
     if (
       !lazy.UrlbarPrefs.get("clipboard.featureGate") ||
       !lazy.UrlbarPrefs.get("suggest.clipboard") ||
-      queryContext.searchString
+      queryContext.searchString ||
+      queryContext.searchMode
     ) {
       return false;
     }
@@ -142,10 +143,7 @@ class ProviderClipboard extends UrlbarProvider {
     addCallback(this, result);
   }
 
-  onEngagement(state, queryContext, details, controller) {
-    if (!["engagement", "abandonment"].includes(state)) {
-      return;
-    }
+  onLegacyEngagement(state, queryContext, details, controller) {
     const visibleResults = controller.view?.visibleResults ?? [];
     for (const result of visibleResults) {
       if (

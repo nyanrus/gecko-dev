@@ -133,6 +133,7 @@ export class UrlbarController {
     // notifications related to the previous query.
     this.notify(NOTIFICATIONS.QUERY_STARTED, queryContext);
     await this.manager.startQuery(queryContext, this);
+
     // If the query has been cancelled, onQueryFinished was notified already.
     // Note this._lastQueryContextWrapper may have changed in the meanwhile.
     if (
@@ -144,6 +145,16 @@ export class UrlbarController {
       this.manager.cancelQuery(queryContext);
       this.notify(NOTIFICATIONS.QUERY_FINISHED, queryContext);
     }
+
+    // Record a potential exposure if the current search string matches one of
+    // the registered keywords.
+    if (!queryContext.isPrivate) {
+      let searchStr = queryContext.trimmedLowerCaseSearchString;
+      if (lazy.UrlbarPrefs.get("potentialExposureKeywords").has(searchStr)) {
+        this.engagementEvent.addPotentialExposure(searchStr);
+      }
+    }
+
     return queryContext;
   }
 
@@ -335,7 +346,7 @@ export class UrlbarController {
         }
         event.preventDefault();
         break;
-      case KeyEvent.DOM_VK_TAB:
+      case KeyEvent.DOM_VK_TAB: {
         // It's always possible to tab through results when the urlbar was
         // focused with the mouse or has a search string, or when the view
         // already has a selection.
@@ -368,6 +379,7 @@ export class UrlbarController {
           event.preventDefault();
         }
         break;
+      }
       case KeyEvent.DOM_VK_PAGE_DOWN:
       case KeyEvent.DOM_VK_PAGE_UP:
         if (event.ctrlKey) {
@@ -592,8 +604,8 @@ export class UrlbarController {
   /**
    * Triggers a "dismiss" engagement for the selected result if one is selected
    * and it's not the heuristic. Providers that can respond to dismissals of
-   * their results should implement `onEngagement()`, handle the dismissal, and
-   * call `controller.removeResult()`.
+   * their results should implement `onLegacyEngagement()`, handle the
+   * dismissal, and call `controller.removeResult()`.
    *
    * @param {Event} event
    *   The event that triggered dismissal.
@@ -708,7 +720,6 @@ class TelemetryEvent {
   constructor(controller, category) {
     this._controller = controller;
     this._category = category;
-    this.#exposureResultTypes = new Set();
     this.#beginObservingPingPrefs();
   }
 
@@ -784,13 +795,6 @@ class TelemetryEvent {
       interactionType: this._getStartInteractionType(event, searchString),
       searchString,
     };
-
-    this._controller.manager.notifyEngagementChange(
-      "start",
-      queryContext,
-      {},
-      this._controller
-    );
   }
 
   /**
@@ -822,17 +826,31 @@ class TelemetryEvent {
    * @param {DOMElement} [details.element] The picked view element.
    */
   record(event, details) {
+    // Prevent re-entering `record()`. This can happen because
+    // `#internalRecord()` will notify an engagement to the provider, that may
+    // execute an action blurring the input field. Then both an engagement
+    // and an abandonment would be recorded for the same session.
+    // Nulling out `_startEventInfo` doesn't save us in this case, because it
+    // happens after `#internalRecord()`, and `isSessionOngoing` must be
+    // calculated inside it.
+    if (this.#handlingRecord) {
+      return;
+    }
+
     // This should never throw, or it may break the urlbar.
     try {
-      this._internalRecord(event, details);
+      this.#handlingRecord = true;
+      this.#internalRecord(event, details);
     } catch (ex) {
       console.error("Could not record event: ", ex);
     } finally {
+      this.#handlingRecord = false;
+
       // Reset the start event info except for engagements that do not end the
       // search session. In that case, the view stays open and further
       // engagements are possible and should be recorded when they occur.
       // (`details.isSessionOngoing` is not a param; rather, it's set by
-      // `_internalRecord()`.)
+      // `#internalRecord()`.)
       if (!details.isSessionOngoing) {
         this._startEventInfo = null;
         this._discarded = false;
@@ -840,19 +858,10 @@ class TelemetryEvent {
     }
   }
 
-  _internalRecord(event, details) {
+  #internalRecord(event, details) {
     const startEventInfo = this._startEventInfo;
 
     if (!this._category || !startEventInfo) {
-      if (this._discarded && this._category && details?.selType !== "dismiss") {
-        let { queryContext } = this._controller._lastQueryContextWrapper || {};
-        this._controller.manager.notifyEngagementChange(
-          "discard",
-          queryContext,
-          {},
-          this._controller
-        );
-      }
       return;
     }
     if (
@@ -939,6 +948,10 @@ class TelemetryEvent {
       }
     );
 
+    if (!details.isSessionOngoing) {
+      this.#recordEndOfSessionTelemetry(details.searchString);
+    }
+
     if (skipLegacyTelemetry) {
       this._controller.manager.notifyEngagementChange(
         method,
@@ -988,7 +1001,6 @@ class TelemetryEvent {
       searchWords,
       searchSource,
       searchMode,
-      selectedElement,
       selIndex,
       selType,
     }
@@ -1032,11 +1044,7 @@ class TelemetryEvent {
         currentResults[selIndex],
         selType
       );
-      const selected_result_subtype =
-        lazy.UrlbarUtils.searchEngagementTelemetrySubtype(
-          currentResults[selIndex],
-          selectedElement
-        );
+      const selected_result_subtype = "";
 
       if (selected_result === "input_field" && !this._controller.view?.isOpen) {
         numResults = 0;
@@ -1092,21 +1100,6 @@ class TelemetryEvent {
       return;
     }
 
-    // First check to see if we can record an exposure event
-    if (
-      (method === "abandonment" || method === "engagement") &&
-      this.#exposureResultTypes.size
-    ) {
-      const exposureResults = Array.from(this.#exposureResultTypes).join(",");
-      this._controller.logger.debug(
-        `exposure event: ${JSON.stringify({ results: exposureResults })}`
-      );
-      Glean.urlbar.exposure.record({ results: exposureResults });
-
-      // reset the provider list on the controller
-      this.#exposureResultTypes.clear();
-    }
-
     this._controller.logger.info(
       `${method} event: ${JSON.stringify(eventInfo)}`
     );
@@ -1114,15 +1107,95 @@ class TelemetryEvent {
     Glean.urlbar[method].record(eventInfo);
   }
 
+  #recordEndOfSessionTelemetry(searchString) {
+    // exposures
+    if (this.#exposureResultTypes.size) {
+      let exposure = {
+        results: [...this.#exposureResultTypes].sort().join(","),
+      };
+      this._controller.logger.debug(
+        `exposure event: ${JSON.stringify(exposure)}`
+      );
+      Glean.urlbar.exposure.record(exposure);
+      this.#exposureResultTypes.clear();
+    }
+    this.#tentativeExposureResultTypes.clear();
+
+    // potential exposures
+    if (this.#potentialExposureKeywords.size) {
+      let normalizedSearchString = searchString.trim().toLowerCase();
+      for (let keyword of this.#potentialExposureKeywords) {
+        let data = {
+          keyword,
+          terminal: keyword == normalizedSearchString,
+        };
+        this._controller.logger.debug(
+          `potential_exposure event: ${JSON.stringify(data)}`
+        );
+        Glean.urlbar.potentialExposure.record(data);
+      }
+      GleanPings.urlbarPotentialExposure.submit();
+      this.#potentialExposureKeywords.clear();
+    }
+  }
+
   /**
-   * Add result type to engagementEvent instance exposureResultTypes Set.
+   * Registers an exposure for a result in the current urlbar session. All
+   * exposures that are added during a session are recorded in an exposure event
+   * at the end of the session. Exposures are cleared at the end of each session
+   * and do not carry over to the next session.
    *
-   * @param {UrlbarResult} result UrlbarResult to have exposure recorded.
+   * @param {UrlbarResult} result An exposure will be added for this result if
+   *        exposures are enabled for its result type.
    */
   addExposure(result) {
     if (result.exposureResultType) {
       this.#exposureResultTypes.add(result.exposureResultType);
     }
+  }
+
+  /**
+   * Registers a tentative exposure for a result in the current urlbar session.
+   * Exposures that remain tentative at the end of the session are discarded and
+   * are not recorded in the exposure event.
+   *
+   * @param {UrlbarResult} result A tentative exposure will be added for this
+   *        result if exposures are enabled for its result type.
+   */
+  addTentativeExposure(result) {
+    if (result.exposureResultType) {
+      this.#tentativeExposureResultTypes.add(result.exposureResultType);
+    }
+  }
+
+  /**
+   * Converts all tentative exposures that were added and not yet discarded
+   * during the current urlbar session into actual exposures that will be
+   * recorded at the end of the session.
+   */
+  acceptTentativeExposures() {
+    for (let type of this.#tentativeExposureResultTypes) {
+      this.#exposureResultTypes.add(type);
+    }
+    this.#tentativeExposureResultTypes.clear();
+  }
+
+  /**
+   * Discards all tentative exposures that were added and not yet accepted
+   * during the current urlbar session.
+   */
+  discardTentativeExposures() {
+    this.#tentativeExposureResultTypes.clear();
+  }
+
+  /**
+   * Registers a potential exposure in the current urlbar session.
+   *
+   * @param {string} keyword
+   *   The keyword that was matched.
+   */
+  addPotentialExposure(keyword) {
+    this.#potentialExposureKeywords.add(keyword);
   }
 
   #getInteractionType(
@@ -1311,7 +1384,12 @@ class TelemetryEvent {
     }
   }
 
+  // Used to avoid re-entering `record()`.
+  #handlingRecord = false;
+
   #previousSearchWordsSet = null;
 
-  #exposureResultTypes;
+  #exposureResultTypes = new Set();
+  #tentativeExposureResultTypes = new Set();
+  #potentialExposureKeywords = new Set();
 }

@@ -285,8 +285,6 @@ static const char kPrefHealthReportUploadEnabled[] =
 static const char kPrefDefaultAgentEnabled[] = "default-browser-agent.enabled";
 
 static const char kPrefServicesSettingsServer[] = "services.settings.server";
-static const char kPrefSecurityContentSignatureRootHash[] =
-    "security.content.signature.root_hash";
 static const char kPrefSetDefaultBrowserUserChoicePref[] =
     "browser.shell.setDefaultBrowserUserChoice";
 #endif  // defined(MOZ_DEFAULT_BROWSER_AGENT)
@@ -577,7 +575,7 @@ bool BrowserTabsRemoteAutostart() {
   // then we could remove this automation-only env variable.
   if (gBrowserTabsRemoteAutostart && xpc::AreNonLocalConnectionsDisabled()) {
     const char* forceDisable = PR_GetEnv("MOZ_FORCE_DISABLE_E10S");
-    if (forceDisable && *forceDisable == '1') {
+    if (forceDisable && !strcmp(forceDisable, "1")) {
       gBrowserTabsRemoteAutostart = false;
       status = kE10sForceDisabled;
     }
@@ -2441,8 +2439,6 @@ static void OnDefaultAgentRemoteSettingsPrefChanged(const char* aPref,
   nsAutoString valueName;
   if (strcmp(aPref, kPrefServicesSettingsServer) == 0) {
     valueName.AssignLiteral("ServicesSettingsServer");
-  } else if (strcmp(aPref, kPrefSecurityContentSignatureRootHash) == 0) {
-    valueName.AssignLiteral("SecurityContentSignatureRootHash");
   } else {
     return;
   }
@@ -2639,8 +2635,8 @@ static nsresult ProfileMissingDialog(nsINativeAppSupport* aNative) {
 #  ifdef MOZ_BACKGROUNDTASKS
   if (BackgroundTasks::IsBackgroundTaskMode()) {
     // We should never get to this point in background task mode.
-    Output(false,
-           "Could not determine any profile running in backgroundtask mode!\n");
+    printf_stderr(
+        "Could not determine any profile running in backgroundtask mode!\n");
     return NS_ERROR_ABORT;
   }
 #  endif  // MOZ_BACKGROUNDTASKS
@@ -4224,7 +4220,9 @@ int XREMain::XRE_mainInit(bool* aExitFlag) {
 
 #if defined(MOZ_SANDBOX) && defined(XP_WIN)
   if (mAppData->sandboxBrokerServices) {
-    SandboxBroker::Initialize(mAppData->sandboxBrokerServices);
+    nsAutoString binDirPath;
+    MOZ_ALWAYS_SUCCEEDS(xreBinDirectory->GetPath(binDirPath));
+    SandboxBroker::Initialize(mAppData->sandboxBrokerServices, binDirPath);
   } else {
 #  if defined(MOZ_SANDBOX)
     // If we're sandboxing content and we fail to initialize, then crashing here
@@ -5593,9 +5591,6 @@ nsresult XREMain::XRE_mainRun() {
         Preferences::RegisterCallbackAndCall(
             &OnDefaultAgentRemoteSettingsPrefChanged,
             kPrefServicesSettingsServer);
-        Preferences::RegisterCallbackAndCall(
-            &OnDefaultAgentRemoteSettingsPrefChanged,
-            kPrefSecurityContentSignatureRootHash);
 
         Preferences::RegisterCallbackAndCall(
             &OnSetDefaultBrowserUserChoicePrefChanged,
