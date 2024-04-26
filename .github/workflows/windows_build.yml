@@ -1,0 +1,69 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# © 2023 Floorp Projects & Contributors
+
+on:
+  workflow_call:
+
+jobs:
+  win-build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Use Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "lts/*"
+
+    - uses: actions/checkout@v4
+      name: Clone 🧬
+      with:
+        submodules: "recursive"
+
+    - name: Configure sccache
+      uses: actions/github-script@v7
+      with:
+        script: |
+          core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+          core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+    - name: Setup 🪛
+      run: |
+        mkdir -p ~/win-cross
+
+        cp ./.github/workflows/win64.mozconfig mozconfig
+
+        # SCCACHE START
+        echo "mk_add_options 'export RUSTC_WRAPPER=/home/runner/.mozbuild/sccache/sccache'" >> mozconfig
+        echo "mk_add_options 'export CCACHE_CPP2=yes'" >> mozconfig
+        echo "ac_add_options --with-ccache=/home/runner/.mozbuild/sccache/sccache" >> mozconfig
+        echo "mk_add_options 'export SCCACHE_GHA_ENABLED=on'" >> mozconfig
+        # SCCACHE END
+
+        ./mach --no-interactive bootstrap --application-choice browser
+
+    - name: setup Rust 🦀
+      run: |
+        rustup target add x86_64-pc-windows-msvc
+
+        #? https://github.com/mozilla/sccache#known-caveats
+        export CARGO_INCREMENTAL=0
+
+    - name: Build 🔨
+      run: |
+        ./mach build
+
+    # Publish START
+    - name: compress zstd
+      run: |
+        tar -hcfv ~/noraneko.tar obj-${arch}-pc-windows-msvc/*
+        zstd ~/noraneko.tar -19 -o ~/noraneko.tar.zst
+
+    - name: Publish Package🎁
+      uses: actions/upload-artifact@v4
+      with:
+        name: noraneko-win-amd64-zstd
+        compression-level: 0
+        path: ~/noraneko.tar.zst
+    # Publish END
