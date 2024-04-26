@@ -30,7 +30,7 @@ jobs:
 
     - name: Setup 🪛
       run: |
-        cd gecko-dev
+        cd $GITHUB_WORKSPACE
 
         cp ./.github/workflows/win64.mozconfig mozconfig
 
