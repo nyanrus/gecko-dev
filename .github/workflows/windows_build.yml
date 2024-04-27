@@ -32,7 +32,7 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE
 
-        cp ./.github/workflows/win64.mozconfig mozconfig
+        cp ./.github/workflows/mozconfigs/win64.mozconfig mozconfig
 
         # SCCACHE START
         echo "mk_add_options 'export RUSTC_WRAPPER=/home/runner/.mozbuild/sccache/sccache'" >> mozconfig
