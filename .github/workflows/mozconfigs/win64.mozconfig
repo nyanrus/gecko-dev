@@ -1,5 +1,5 @@
 ac_add_options --with-app-name=noraneko
-ac_add_options --with-app-basename=noraneko
+ac_add_options --with-app-basename=Noraneko
 
 ac_add_options --disable-crashreporter
 ac_add_options --disable-maintenance-service
