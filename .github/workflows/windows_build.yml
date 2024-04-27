@@ -41,16 +41,7 @@ jobs:
 
         cp ./.github/workflows/mozconfigs/win64.mozconfig mozconfig
 
-        # SCCACHE START
-        mk_add_options 'export RUSTC_WRAPPER=sccache'
-        mk_add_options 'export CCACHE_CPP2=yes'
-        ac_add_options --with-ccache
-        echo "mk_add_options 'export SCCACHE_GHA_ENABLED=on'" >> mozconfig
-        # SCCACHE END
-
         ./mach --no-interactive bootstrap --application-choice browser
-
-
 
     - name: Build 🔨
       run: |
