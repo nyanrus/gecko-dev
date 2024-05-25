@@ -12,7 +12,9 @@
 
 "use strict";
 
-const { getCSSLexer } = require("resource://devtools/shared/css/lexer.js");
+const {
+  InspectorCSSParserWrapper,
+} = require("resource://devtools/shared/css/lexer.js");
 const {
   COMMENT_PARSING_HEURISTIC_BYPASS_CHAR,
   escapeCSSComment,
@@ -194,7 +196,7 @@ RuleRewriter.prototype = {
     // into "url(;)" by this code -- due to the way "url(...)" is
     // parsed as a single token.
     text = text.replace(/;$/, "");
-    const lexer = getCSSLexer(text, true, true);
+    const lexer = new InspectorCSSParserWrapper(text, { trackEOFChars: true });
 
     let result = "";
     let previousOffset = 0;
@@ -292,7 +294,7 @@ RuleRewriter.prototype = {
     // Copy out any remaining text, then any needed terminators.
     result += text.substring(previousOffset, text.length);
 
-    const eofFixup = lexer.performEOFFixup("", true);
+    const eofFixup = lexer.performEOFFixup("");
     if (eofFixup) {
       anySanitized = true;
       result += eofFixup;

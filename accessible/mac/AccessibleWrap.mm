@@ -192,6 +192,12 @@ Class a11y::GetTypeFromRole(roles::Role aRole) {
     case roles::RADIO_MENU_ITEM:
       return [mozRadioButtonAccessible class];
 
+    case roles::PROGRESSBAR:
+      return [mozRangeAccessible class];
+
+    case roles::METER:
+      return [mozMeterAccessible class];
+
     case roles::SPINBUTTON:
     case roles::SLIDER:
       return [mozIncrementableAccessible class];

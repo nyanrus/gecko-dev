@@ -95,22 +95,27 @@ add_task(async function test_started_and_canceled_events() {
       let helper = new ScreenshotsHelper(browser);
       let screenshotExit;
 
+      info("Open screenshots via toolbar button");
       helper.triggerUIFromToolbar();
       await helper.waitForOverlay();
 
       screenshotExit = TestUtils.topicObserved("screenshots-exit");
+      info("Close screenshots via toolbar button");
       helper.triggerUIFromToolbar();
       await helper.waitForOverlayClosed();
       await screenshotExit;
 
+      info("Open screenshots via keyboard shortcut");
       EventUtils.synthesizeKey("s", { shiftKey: true, accelKey: true });
       await helper.waitForOverlay();
 
       screenshotExit = TestUtils.topicObserved("screenshots-exit");
+      info("Close screenshots via keyboard shortcut");
       EventUtils.synthesizeKey("s", { shiftKey: true, accelKey: true });
       await helper.waitForOverlayClosed();
       await screenshotExit;
 
+      info("Open screenshots via context menu");
       let contextMenu = document.getElementById("contentAreaContextMenu");
       let popupShownPromise = BrowserTestUtils.waitForEvent(
         contextMenu,
@@ -148,19 +153,20 @@ add_task(async function test_started_and_canceled_events() {
       await popupShownPromise;
 
       screenshotExit = TestUtils.topicObserved("screenshots-exit");
+      info("Close screenshots via context menu");
       contextMenu.activateItem(
         contextMenu.querySelector("#context-take-screenshot")
       );
       await helper.waitForOverlayClosed();
       await screenshotExit;
 
+      info("Open screenshots via quickactions");
       await UrlbarTestUtils.promiseAutocompleteResultPopup({
         window,
         value: "screenshot",
         waitForFocus: SimpleTest.waitForFocus,
       });
 
-      info("Trigger the screenshot mode");
       EventUtils.synthesizeKey("KEY_Tab", {}, window);
       EventUtils.synthesizeKey("KEY_Enter", {}, window);
       await helper.waitForOverlay();
@@ -171,7 +177,7 @@ add_task(async function test_started_and_canceled_events() {
         waitForFocus: SimpleTest.waitForFocus,
       });
 
-      info("Trigger the screenshot mode");
+      info("Close screenshots via quickactions");
       screenshotExit = TestUtils.topicObserved("screenshots-exit");
       EventUtils.synthesizeKey("KEY_Tab", {}, window);
       EventUtils.synthesizeKey("KEY_Enter", {}, window);
@@ -205,12 +211,11 @@ add_task(async function test_started_retry() {
       // click the visible page button in panel
       let visiblePageButton = panel
         .querySelector("screenshots-buttons")
-        .shadowRoot.querySelector(".visible-page");
+        .shadowRoot.querySelector("#visible-page");
       visiblePageButton.click();
       await screenshotReady;
 
-      let dialog = helper.getDialog();
-      let retryButton = dialog._frame.contentDocument.getElementById("retry");
+      let retryButton = helper.getDialogButton("retry");
       ok(retryButton, "Got the retry button");
       retryButton.click();
 
@@ -243,12 +248,11 @@ add_task(async function test_canceled() {
       // click the full page button in panel
       let fullPageButton = panel
         .querySelector("screenshots-buttons")
-        .shadowRoot.querySelector(".full-page");
+        .shadowRoot.querySelector("#full-page");
       fullPageButton.click();
       await screenshotReady;
 
-      let dialog = helper.getDialog();
-      let cancelButton = dialog._frame.contentDocument.getElementById("cancel");
+      let cancelButton = helper.getDialogButton("cancel");
       ok(cancelButton, "Got the cancel button");
 
       let screenshotExit = TestUtils.topicObserved("screenshots-exit");
@@ -305,13 +309,12 @@ add_task(async function test_copy() {
       // click the visible page button in panel
       let visiblePageButton = panel
         .querySelector("screenshots-buttons")
-        .shadowRoot.querySelector(".visible-page");
+        .shadowRoot.querySelector("#visible-page");
       visiblePageButton.click();
       info("clicked visible page, waiting for screenshots-preview-ready");
       await screenshotReady;
 
-      let dialog = helper.getDialog();
-      let copyButton = dialog._frame.contentDocument.getElementById("copy");
+      let copyButton = helper.getDialogButton("copy");
 
       let screenshotExit = TestUtils.topicObserved("screenshots-exit");
       let clipboardChanged = helper.waitForRawClipboardChange(
@@ -416,13 +419,12 @@ add_task(async function test_extra_telemetry() {
       // click the visible page button in panel
       let visiblePageButton = panel
         .querySelector("screenshots-buttons")
-        .shadowRoot.querySelector(".visible-page");
+        .shadowRoot.querySelector("#visible-page");
       visiblePageButton.click();
       info("clicked visible page, waiting for screenshots-preview-ready");
       await screenshotReady;
 
-      let dialog = helper.getDialog();
-      let retryButton = dialog._frame.contentDocument.getElementById("retry");
+      let retryButton = helper.getDialogButton("retry");
       retryButton.click();
 
       info("waiting for panel");
@@ -433,14 +435,13 @@ add_task(async function test_extra_telemetry() {
       // click the full page button in panel
       let fullPageButton = panel
         .querySelector("screenshots-buttons")
-        .shadowRoot.querySelector(".full-page");
+        .shadowRoot.querySelector("#full-page");
       fullPageButton.click();
       await screenshotReady;
 
       let screenshotExit = TestUtils.topicObserved("screenshots-exit");
 
-      dialog = helper.getDialog();
-      let copyButton = dialog._frame.contentDocument.getElementById("copy");
+      let copyButton = helper.getDialogButton("copy");
       retryButton.click();
       // click copy button on dialog box
       info("clicking the copy button");

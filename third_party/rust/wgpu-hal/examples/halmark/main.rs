@@ -253,12 +253,14 @@ impl<A: hal::Api> Example<A> {
                 module: &shader,
                 entry_point: "vs_main",
                 constants: &constants,
+                zero_initialize_workgroup_memory: true,
             },
             vertex_buffers: &[],
             fragment_stage: Some(hal::ProgrammableStage {
                 module: &shader,
                 entry_point: "fs_main",
                 constants: &constants,
+                zero_initialize_workgroup_memory: true,
             }),
             primitive: wgt::PrimitiveState {
                 topology: wgt::PrimitiveTopology::TriangleStrip,
@@ -272,6 +274,7 @@ impl<A: hal::Api> Example<A> {
                 write_mask: wgt::ColorWrites::default(),
             })],
             multiview: None,
+            cache: None,
         };
         let pipeline = unsafe { device.create_render_pipeline(&pipeline_desc).unwrap() };
 
@@ -843,6 +846,7 @@ fn main() {
                             }
                         }
                         ex.render();
+                        window.request_redraw();
                     }
                     _ => {
                         example.as_mut().unwrap().update(event);

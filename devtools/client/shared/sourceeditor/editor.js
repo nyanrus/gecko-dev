@@ -158,6 +158,11 @@ class Editor extends EventEmitter {
   version = null;
   config = null;
   Doc = null;
+  searchState = {
+    cursors: [],
+    currentCursorIndex: -1,
+    query: null,
+  };
 
   #CodeMirror6;
   #compartments;
@@ -168,6 +173,7 @@ class Editor extends EventEmitter {
   #win;
   #lineGutterMarkers = new Map();
   #lineContentMarkers = new Map();
+  #posContentMarkers = new Map();
   #lineContentEventHandlers = {};
 
   #updateListener = null;
@@ -628,6 +634,8 @@ class Editor extends EventEmitter {
     const lineNumberCompartment = new Compartment();
     const lineNumberMarkersCompartment = new Compartment();
     const lineContentMarkerCompartment = new Compartment();
+    const positionContentMarkersCompartment = new Compartment();
+    const searchHighlightCompartment = new Compartment();
 
     this.#compartments = {
       tabSizeCompartment,
@@ -636,6 +644,8 @@ class Editor extends EventEmitter {
       lineNumberCompartment,
       lineNumberMarkersCompartment,
       lineContentMarkerCompartment,
+      positionContentMarkersCompartment,
+      searchHighlightCompartment,
     };
 
     const indentStr = (this.config.indentWithTabs ? "\t" : " ").repeat(
@@ -643,6 +653,7 @@ class Editor extends EventEmitter {
     );
 
     const extensions = [
+      codemirrorLanguage.bracketMatching(),
       indentCompartment.of(codemirrorLanguage.indentUnit.of(indentStr)),
       tabSizeCompartment.of(EditorState.tabSize.of(this.config.tabSize)),
       lineWrapCompartment.of(
@@ -678,8 +689,12 @@ class Editor extends EventEmitter {
       }),
       lineNumberMarkersCompartment.of([]),
       lineContentMarkerCompartment.of(
-        this.#lineContentMarkersExtension({ markers: [] })
+        this.#lineContentMarkersExtension({ lineMarkers: [] })
       ),
+      positionContentMarkersCompartment.of(
+        this.#positionContentMarkersExtension([])
+      ),
+      searchHighlightCompartment.of(this.#searchHighlighterExtension([])),
       // keep last so other extension take precedence
       codemirror.minimalSetup,
     ];
@@ -699,34 +714,51 @@ class Editor extends EventEmitter {
   /**
    * This creates the extension used to manage the rendering of markers
    * for in editor line content.
-   * @param   {Array}             markers - The current list of markers
+   * @param   {Array}             lineMarkers - The current list of markers
    * @param   {Object}            domEventHandlers - A dictionary of handlers for the DOM events
    *                                                  See https://codemirror.net/docs/ref/#view.PluginSpec.eventHandlers
-   * @returns {Array<ViewPlugin>} showLineContentDecorations - An extension which is an array containing the view
-   *                                                           which manages the rendering of the line content markers.
+   * @returns {Array<ViewPlugin>}  An extension which is an array containing the view
+   *                               which manages the rendering of the line content markers.
    */
-  #lineContentMarkersExtension({ markers, domEventHandlers }) {
+  #lineContentMarkersExtension({ lineMarkers, domEventHandlers }) {
     const {
-      codemirrorView: { Decoration, ViewPlugin },
+      codemirrorView: { Decoration, ViewPlugin, WidgetType },
       codemirrorState: { RangeSetBuilder, RangeSet },
     } = this.#CodeMirror6;
 
+    class LineContentWidget extends WidgetType {
+      constructor(line, createElementNode) {
+        super();
+        this.toDOM = () => createElementNode(line);
+      }
+    }
+
     // Build and return the decoration set
     function buildDecorations(view) {
-      if (!markers) {
+      if (!lineMarkers) {
         return RangeSet.empty;
       }
       const builder = new RangeSetBuilder();
       for (const { from, to } of view.visibleRanges) {
         for (let pos = from; pos <= to; ) {
           const line = view.state.doc.lineAt(pos);
-          for (const { lineClassName, condition } of markers) {
-            if (condition(line.number)) {
-              builder.add(
-                line.from,
-                line.from,
-                Decoration.line({ class: lineClassName })
-              );
+          for (const marker of lineMarkers) {
+            if (marker.condition(line.number)) {
+              if (marker.lineClassName) {
+                const classDecoration = Decoration.line({
+                  class: marker.lineClassName,
+                });
+                builder.add(line.from, line.from, classDecoration);
+              }
+              if (marker.createLineElementNode) {
+                const nodeDecoration = Decoration.widget({
+                  widget: new LineContentWidget(
+                    line.number,
+                    marker.createLineElementNode
+                  ),
+                });
+                builder.add(line.to, line.to, nodeDecoration);
+              }
             }
           }
           pos = line.to + 1;
@@ -798,6 +830,9 @@ class Editor extends EventEmitter {
    *   @property {string}     marker.lineClassName - The css class to add to the line
    *   @property {function}   marker.condition - The condition that decides if the marker/class gets added or removed.
    *                                             The line is passed as an argument.
+   *   @property {function}   marker.createLineElementNode - This should return the DOM element which
+   *                                            is used for the marker. The line number is passed as a parameter.
+   *                                            This is optional.
    */
   setLineContentMarker(marker) {
     const cm = editors.get(this);
@@ -806,7 +841,7 @@ class Editor extends EventEmitter {
     cm.dispatch({
       effects: this.#compartments.lineContentMarkerCompartment.reconfigure(
         this.#lineContentMarkersExtension({
-          markers: Array.from(this.#lineContentMarkers.values()),
+          lineMarkers: Array.from(this.#lineContentMarkers.values()),
         })
       ),
     });
@@ -823,8 +858,175 @@ class Editor extends EventEmitter {
     cm.dispatch({
       effects: this.#compartments.lineContentMarkerCompartment.reconfigure(
         this.#lineContentMarkersExtension({
-          markers: Array.from(this.#lineContentMarkers.values()),
+          lineMarkers: Array.from(this.#lineContentMarkers.values()),
         })
+      ),
+    });
+  }
+
+  /**
+   * This creates the extension used to manage the rendering of markers
+   * at specific positions with the editor. e.g used for column breakpoints
+   * @param   {Array}             markers - The current list of markers
+   * @returns {Array<ViewPlugin>} An extension which is an array containing the view
+   *                              which manages the rendering of the position content markers.
+   */
+  #positionContentMarkersExtension(markers) {
+    const {
+      codemirrorView: { Decoration, ViewPlugin, WidgetType },
+      codemirrorState: { RangeSet },
+      codemirrorLanguage: { syntaxTree },
+    } = this.#CodeMirror6;
+
+    class NodeWidget extends WidgetType {
+      constructor(line, column, createElementNode, domNode) {
+        super();
+        this.toDOM = () => createElementNode(line, column, domNode);
+      }
+    }
+
+    function getIndentation(lineText) {
+      if (!lineText) {
+        return 0;
+      }
+
+      const lineMatch = lineText.match(/^\s*/);
+      if (!lineMatch) {
+        return 0;
+      }
+      return lineMatch[0].length;
+    }
+
+    // Build and return the decoration set
+    function buildDecorations(view) {
+      const ranges = [];
+      const { from, to } = view.viewport;
+      const vStartLine = view.state.doc.lineAt(from);
+      const vEndLine = view.state.doc.lineAt(to);
+      for (const marker of markers) {
+        for (const position of marker.positions) {
+          // If codemirror positions are provided (e.g from search cursor)
+          // compare that directly.
+          if (position?.from >= from && position?.to <= to) {
+            if (marker.positionClassName) {
+              const classDecoration = Decoration.mark({
+                class: marker.positionClassName,
+              });
+              ranges.push({
+                from: position.from,
+                to: position.to,
+                value: classDecoration,
+              });
+            }
+            continue;
+          }
+          // If line and column are provided
+          if (
+            position.line >= vStartLine.number &&
+            position.line <= vEndLine.number
+          ) {
+            const line = view.state.doc.line(position.line);
+            // Make sure to track any indentation at the beginning of the line
+            const column = Math.max(position.column, getIndentation(line.text));
+            const pos = line.from + column;
+
+            if (marker.createPositionElementNode) {
+              const nodeDecoration = Decoration.widget({
+                widget: new NodeWidget(
+                  position.line,
+                  position.column,
+                  marker.createPositionElementNode
+                ),
+                // Make sure the widget is rendered after the cursor
+                // see https://codemirror.net/docs/ref/#view.Decoration^widget^spec.side for details.
+                side: 1,
+              });
+              ranges.push({ from: pos, to: pos, value: nodeDecoration });
+            }
+            if (marker.positionClassName) {
+              const tokenAtPos = syntaxTree(view.state).resolve(pos, 1);
+              const tokenString = line.text.slice(
+                position.column,
+                tokenAtPos.to - line.from
+              );
+              // ignore opening braces
+              if (tokenString === "{" || tokenString === "[") {
+                continue;
+              }
+              const classDecoration = Decoration.mark({
+                class: marker.positionClassName,
+              });
+              ranges.push({
+                from: pos,
+                to: tokenAtPos.to,
+                value: classDecoration,
+              });
+            }
+          }
+        }
+      }
+      // Make sure to sort the rangeset as its required to render in order
+      return RangeSet.of(ranges, /*sort*/ true);
+    }
+
+    // The view which handles rendering and updating the
+    // markers decorations
+    const positionContentMarkersView = ViewPlugin.fromClass(
+      class {
+        decorations;
+        constructor(view) {
+          this.decorations = buildDecorations(view);
+        }
+        update(update) {
+          if (update.docChanged || update.viewportChanged) {
+            this.decorations = buildDecorations(update.view);
+          }
+        }
+      },
+      {
+        decorations: v => v.decorations,
+      }
+    );
+
+    return [positionContentMarkersView];
+  }
+
+  /**
+   * This adds a marker used to decorate token / content at
+   * a specific position (defined by a line and column).
+   * @param {Object} marker
+   * @param {String} marker.id
+   * @param {Array} marker.positions
+   * @param {Function} marker.createPositionElementNode
+   */
+  setPositionContentMarker(marker) {
+    const cm = editors.get(this);
+    this.#posContentMarkers.set(marker.id, marker);
+
+    cm.dispatch({
+      effects: this.#compartments.positionContentMarkersCompartment.reconfigure(
+        this.#positionContentMarkersExtension(
+          Array.from(this.#posContentMarkers.values())
+        )
+      ),
+    });
+  }
+
+  /**
+   * This removes the marker which has the specified id
+   * @param {string} markerId - The unique identifier for this marker
+   */
+  removePositionContentMarker(markerId) {
+    if (!this.#posContentMarkers.has(markerId)) {
+      return;
+    }
+    const cm = editors.get(this);
+    this.#posContentMarkers.delete(markerId);
+    cm.dispatch({
+      effects: this.#compartments.positionContentMarkersCompartment.reconfigure(
+        this.#positionContentMarkersExtension(
+          Array.from(this.#posContentMarkers.values())
+        )
       ),
     });
   }
@@ -913,31 +1115,31 @@ class Editor extends EventEmitter {
     // (representing the lines in the current viewport) and generate a new rangeset for updating the line gutter
     // based on the conditions defined in the markers(for each line) provided.
     const builder = new RangeSetBuilder();
-    for (const { from, to } of cm.visibleRanges) {
-      for (let pos = from; pos <= to; ) {
-        const line = cm.state.doc.lineAt(pos);
-        for (const {
-          lineClassName,
-          condition,
-          createLineElementNode,
-        } of markers) {
-          if (typeof condition !== "function") {
-            throw new Error("The `condition` is not a valid function");
-          }
-          if (condition(line.number)) {
-            builder.add(
-              line.from,
-              line.to,
-              new LineGutterMarker(
-                lineClassName,
-                line.number,
-                createLineElementNode
-              )
-            );
-          }
+    const { from, to } = cm.viewport;
+    let pos = from;
+    while (pos <= to) {
+      const line = cm.state.doc.lineAt(pos);
+      for (const {
+        lineClassName,
+        condition,
+        createLineElementNode,
+      } of markers) {
+        if (typeof condition !== "function") {
+          throw new Error("The `condition` is not a valid function");
         }
-        pos = line.to + 1;
+        if (condition(line.number)) {
+          builder.add(
+            line.from,
+            line.to,
+            new LineGutterMarker(
+              lineClassName,
+              line.number,
+              createLineElementNode
+            )
+          );
+        }
       }
+      pos = line.to + 1;
     }
 
     // To update the state with the newly generated marker range set, a dispatch is called on the view
@@ -948,6 +1150,169 @@ class Editor extends EventEmitter {
         lineNumberMarkers.of(builder.finish())
       ),
     });
+  }
+
+  /**
+   * This creates the extension used to manage the rendering of markers for
+   * results for any search pattern
+   * @param {RegExp}      pattern - The search pattern
+   * @param {String}      className - The class used to decorate each result
+   * @returns {Array<ViewPlugin>} An extension which is an array containing the view
+   *                              which manages the rendering of the line content markers.
+   */
+  #searchHighlighterExtension({
+    /* This defaults to matching nothing */ pattern = /.^/g,
+    className = "",
+  }) {
+    const cm = editors.get(this);
+    if (!cm) {
+      return [];
+    }
+    const {
+      codemirrorView: { Decoration, ViewPlugin, EditorView, MatchDecorator },
+      codemirrorSearch: { RegExpCursor },
+    } = this.#CodeMirror6;
+
+    this.searchState.query = pattern;
+    const searchCursor = new RegExpCursor(cm.state.doc, pattern, {
+      ignoreCase: pattern.ignoreCase,
+    });
+    this.searchState.cursors = Array.from(searchCursor);
+    this.searchState.currentCursorIndex = -1;
+
+    const patternMatcher = new MatchDecorator({
+      regexp: pattern,
+      decorate: (add, from, to) => {
+        add(from, to, Decoration.mark({ class: className }));
+      },
+    });
+
+    const searchHighlightView = ViewPlugin.fromClass(
+      class {
+        decorations;
+        constructor(view) {
+          this.decorations = patternMatcher.createDeco(view);
+        }
+        update(viewUpdate) {
+          this.decorations = patternMatcher.updateDeco(
+            viewUpdate,
+            this.decorations
+          );
+        }
+      },
+      {
+        decorations: instance => instance.decorations,
+        provide: plugin =>
+          EditorView.atomicRanges.of(view => {
+            return view.plugin(plugin)?.decorations || Decoration.none;
+          }),
+      }
+    );
+
+    return [searchHighlightView];
+  }
+
+  /**
+   * This should add the class to the results of a search pattern specified
+   *
+   * @param {RegExp} pattern - The search pattern
+   * @param {String} className - The class used to decorate each result
+   */
+  highlightSearchMatches(pattern, className) {
+    const cm = editors.get(this);
+    cm.dispatch({
+      effects: this.#compartments.searchHighlightCompartment.reconfigure(
+        this.#searchHighlighterExtension({ pattern, className })
+      ),
+    });
+  }
+
+  /**
+   * This clear any decoration on all the search results
+   */
+  clearSearchMatches() {
+    this.highlightSearchMatches(undefined, "");
+  }
+
+  /**
+   * Retrieves the cursor for the next selection to be highlighted
+   *
+   * @param {Boolean} reverse - Determines the direction of the cursor movement
+   * @returns {RegExpSearchCursor}
+   */
+  getNextSearchCursor(reverse) {
+    if (reverse) {
+      if (this.searchState.currentCursorIndex == 0) {
+        this.searchState.currentCursorIndex =
+          this.searchState.cursors.length - 1;
+      } else {
+        this.searchState.currentCursorIndex--;
+      }
+    } else if (
+      this.searchState.currentCursorIndex ==
+      this.searchState.cursors.length - 1
+    ) {
+      this.searchState.currentCursorIndex = 0;
+    } else {
+      this.searchState.currentCursorIndex++;
+    }
+    return this.searchState.cursors[this.searchState.currentCursorIndex];
+  }
+
+  /**
+   * Get the start and end locations of the current viewport
+   * @returns {Object}  - The location information for the current viewport
+   */
+  getLocationsInViewport() {
+    const cm = editors.get(this);
+    if (this.config.cm6) {
+      const { from, to } = cm.viewport;
+      const lineFrom = cm.state.doc.lineAt(from);
+      const lineTo = cm.state.doc.lineAt(to);
+      // This returns boundary of the full viewport regardless of the horizontal
+      // scroll position.
+      return {
+        start: { line: lineFrom.number, column: 0 },
+        end: { line: lineTo.number, column: lineTo.to - lineTo.from },
+      };
+    }
+    // Offset represents an allowance of characters or lines offscreen to improve
+    // perceived performance of column breakpoint rendering
+    const offsetHorizontalCharacters = 100;
+    const offsetVerticalLines = 20;
+    // Get scroll position
+    if (!cm) {
+      return {
+        start: { line: 0, column: 0 },
+        end: { line: 0, column: 0 },
+      };
+    }
+    const charWidth = cm.defaultCharWidth();
+    const scrollArea = cm.getScrollInfo();
+    const { scrollLeft } = cm.doc;
+    const rect = cm.getWrapperElement().getBoundingClientRect();
+    const topVisibleLine =
+      cm.lineAtHeight(rect.top, "window") - offsetVerticalLines;
+    const bottomVisibleLine =
+      cm.lineAtHeight(rect.bottom, "window") + offsetVerticalLines;
+
+    const leftColumn = Math.floor(
+      scrollLeft > 0 ? scrollLeft / charWidth - offsetHorizontalCharacters : 0
+    );
+    const rightPosition = scrollLeft + (scrollArea.clientWidth - 30);
+    const rightCharacter =
+      Math.floor(rightPosition / charWidth) + offsetHorizontalCharacters;
+
+    return {
+      start: {
+        line: topVisibleLine || 0,
+        column: leftColumn || 0,
+      },
+      end: {
+        line: bottomVisibleLine || 0,
+        column: rightCharacter,
+      },
+    };
   }
 
   /**
@@ -1956,6 +2321,155 @@ class Editor extends EventEmitter {
         });
       }
     });
+  }
+
+  /**
+   * This checks if the specified position (top/left) is within the current viewpport
+   * bounds. it helps determine is scrolling should happen.
+   * @param {Object} cm - The codemirror instance
+   * @param {Number} line - The line in the source
+   * @param {Number} column - The column in the source
+   * @returns {Boolean}
+   */
+  #isVisible(cm, line, column) {
+    let inXView, inYView;
+
+    function withinBounds(x, min, max) {
+      return x >= min && x <= max;
+    }
+
+    if (this.config.cm6) {
+      const pos = this.#posToOffset(cm.state.doc, line, column);
+      const coords = pos && cm.coordsAtPos(pos);
+      if (!coords) {
+        return false;
+      }
+      const { scrollTop, scrollLeft, clientHeight, clientWidth } = cm.scrollDOM;
+
+      inXView = withinBounds(coords.left, scrollLeft, scrollLeft + clientWidth);
+      inYView = withinBounds(coords.top, scrollTop, scrollTop + clientHeight);
+    } else {
+      const { top, left } = cm.charCoords({ line, ch: column }, "local");
+      const scrollArea = cm.getScrollInfo();
+      const charWidth = cm.defaultCharWidth();
+      const fontHeight = cm.defaultTextHeight();
+      const { scrollTop, scrollLeft } = cm.doc;
+
+      inXView = withinBounds(
+        left,
+        scrollLeft,
+        // Note: 30 might relate to the margin on one of the scroll bar elements.
+        // See comment https://github.com/firefox-devtools/debugger/pull/5182#discussion_r163439209
+        scrollLeft + (scrollArea.clientWidth - 30) - charWidth
+      );
+      inYView = withinBounds(
+        top,
+        scrollTop,
+        scrollTop + scrollArea.clientHeight - fontHeight
+      );
+    }
+    return inXView && inYView;
+  }
+
+  /**
+   * Converts  line/col to CM6 offset position
+   * @param {Object} doc - the codemirror document
+   * @param {Number} line - The line in the source
+   * @param {Number} col - The column in the source
+   * @returns {Number}
+   */
+  #posToOffset(doc, line, col) {
+    if (!this.config.cm6) {
+      throw new Error("This function is only compatible with CM6");
+    }
+    try {
+      const offset = doc.line(line);
+      return offset.from + col;
+    } catch (e) {
+      // Line likey does not exist in viewport yet
+      console.warn(e.message);
+    }
+    return null;
+  }
+
+  /**
+   * This returns the line and column for the specified search cursor's position
+   *
+   * @param {RegExpSearchCursor} searchCursor
+   * @returns {Object}
+   */
+  getPositionFromSearchCursor(searchCursor) {
+    const cm = editors.get(this);
+    const lineFrom = cm.state.doc.lineAt(searchCursor.from);
+    return {
+      line: lineFrom.number - 1,
+      ch: searchCursor.to - searchCursor.match[0].length - lineFrom.from,
+    };
+  }
+
+  /**
+   * Scrolls the editor to the specified codemirror position
+   *
+   * @param {Number} position
+   */
+  scrollToPosition(position) {
+    const cm = editors.get(this);
+    if (!this.config.cm6) {
+      throw new Error("This function is only compatible with CM6");
+    }
+    const {
+      codemirrorView: { EditorView },
+    } = this.#CodeMirror6;
+    cm.dispatch({
+      effects: EditorView.scrollIntoView(position, {
+        x: "nearest",
+        y: "center",
+      }),
+    });
+  }
+
+  /**
+   * Scrolls the editor to the specified line and column
+   * @param {Number} line - The line in the source
+   * @param {Number} column - The column in the source
+   */
+  scrollTo(line, column) {
+    const cm = editors.get(this);
+    if (this.config.cm6) {
+      const {
+        codemirrorView: { EditorView },
+      } = this.#CodeMirror6;
+
+      if (!this.#isVisible(cm, line, column)) {
+        const offset = this.#posToOffset(cm.state.doc, line, column);
+        if (!offset) {
+          return;
+        }
+        cm.dispatch({
+          effects: EditorView.scrollIntoView(offset, {
+            x: "nearest",
+            y: "center",
+          }),
+        });
+      }
+    } else {
+      // For all cases where these are on the first line and column,
+      // avoid the possibly slow computation of cursor location on large bundles.
+      if (!line && !column) {
+        cm.scrollTo(0, 0);
+        return;
+      }
+
+      const { top, left } = cm.charCoords({ line, ch: column }, "local");
+
+      if (!this.#isVisible(cm, line, column)) {
+        const scroller = cm.getScrollerElement();
+        const centeredX = Math.max(left - scroller.offsetWidth / 2, 0);
+        const centeredY = Math.max(top - scroller.offsetHeight / 2, 0);
+
+        cm.scrollTo(centeredX, centeredY);
+      }
+    }
   }
 
   /**

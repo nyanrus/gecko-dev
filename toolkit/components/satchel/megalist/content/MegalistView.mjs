@@ -4,12 +4,13 @@
 
 import { html } from "chrome://global/content/vendor/lit.all.mjs";
 import { MozLitElement } from "chrome://global/content/lit-utils.mjs";
+import {
+  createDialog,
+  cancelDialog,
+} from "chrome://global/content/megalist/Dialog.mjs";
 
 // eslint-disable-next-line import/no-unassigned-import
 import "chrome://global/content/megalist/VirtualizedList.mjs";
-
-// eslint-disable-next-line import/no-unassigned-import
-import "chrome://global/content/megalist/RemoveLogins.mjs";
 
 /**
  * Map with limit on how many entries it can have.
@@ -303,7 +304,13 @@ export class MegalistView extends MozLitElement {
   }
 
   receiveSetLayout({ layout }) {
-    this.layout = layout;
+    if (layout) {
+      createDialog(layout, commandId =>
+        this.#messageToViewModel("Command", { commandId })
+      );
+    } else {
+      cancelDialog();
+    }
   }
 
   #handleInputChange(e) {
@@ -478,20 +485,17 @@ export class MegalistView extends MozLitElement {
    * by the View Model. Defaults to displaying the search input.
    */
   renderBeforeList() {
-    if (this.layout?.id) {
-      const el = document.createElement(this.layout?.id);
-      el.data = this.layout.data;
-      return el;
-    }
-
     return html`
-      <input
-        class="search"
-        type="search"
-        data-l10n-id="filter-placeholder"
-        .value=${this.searchText}
-        @input=${e => this.#handleInputChange(e)}
-      />
+      <div class="searchContainer" @click=${() => this.searchInput.select()}>
+        <div class="searchIcon"></div>
+        <input
+          class="search"
+          type="search"
+          data-l10n-id="filter-input"
+          .value=${this.searchText}
+          @input=${e => this.#handleInputChange(e)}
+        />
+      </div>
     `;
   }
 

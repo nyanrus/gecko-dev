@@ -216,17 +216,33 @@ static nsCString ImageAcceptHeader() {
     mimeTypes.Append("image/jxl,");
   }
 
-  mimeTypes.Append("image/webp,*/*");
+  mimeTypes.Append("image/webp,");
+
+  // Default value as specified by fetch standard
+  // https://fetch.spec.whatwg.org/commit-snapshots/8dd73dbecfefdbef8f432164fb3a5b9785f7f520/#ref-for-header-list-contains%E2%91%A7
+  mimeTypes.Append("image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5");
 
   return mimeTypes;
 }
 
-static nsCString DocumentAcceptHeader(const nsCString& aImageAcceptHeader) {
-  nsPrintfCString mimeTypes(
-      "text/html,application/xhtml+xml,application/xml;q=0.9,%s;q=0.8",
-      aImageAcceptHeader.get());
+static nsCString DocumentAcceptHeader() {
+  // https://fetch.spec.whatwg.org/#document-accept-header-value
+  // The value specified by the fetch standard is
+  // `text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8`
+  // but we also insert all of the image formats before */*
+  nsCString mimeTypes("text/html,application/xhtml+xml,application/xml;q=0.9,");
 
-  return std::move(mimeTypes);
+  if (mozilla::StaticPrefs::image_avif_enabled()) {
+    mimeTypes.Append("image/avif,");
+  }
+
+  if (mozilla::StaticPrefs::image_jxl_enabled()) {
+    mimeTypes.Append("image/jxl,");
+  }
+
+  mimeTypes.Append("image/webp,image/png,image/svg+xml,*/*;q=0.8");
+
+  return mimeTypes;
 }
 
 nsHttpHandler::nsHttpHandler()
@@ -235,12 +251,11 @@ nsHttpHandler::nsHttpHandler()
           PR_SecondsToInterval(StaticPrefs::network_http_http2_timeout())),
       mResponseTimeout(PR_SecondsToInterval(300)),
       mImageAcceptHeader(ImageAcceptHeader()),
-      mDocumentAcceptHeader(DocumentAcceptHeader(ImageAcceptHeader())),
+      mDocumentAcceptHeader(DocumentAcceptHeader()),
       mLastUniqueID(NowInSeconds()),
       mDebugObservations(false),
       mEnableAltSvc(false),
       mEnableAltSvcOE(false),
-      mEnableOriginExtension(false),
       mSpdyPingThreshold(PR_SecondsToInterval(
           StaticPrefs::network_http_http2_ping_threshold())),
       mSpdyPingTimeout(PR_SecondsToInterval(
@@ -853,7 +868,7 @@ void nsHttpHandler::InitUserAgentComponents() {
   // Gather platform.
   mPlatform.AssignLiteral(
 #if defined(ANDROID)
-      "Linux; Android"
+      "Android"
 #elif defined(XP_WIN)
       "Windows"
 #elif defined(XP_MACOSX)
@@ -878,12 +893,29 @@ void nsHttpHandler::InitUserAgentComponents() {
       do_GetService("@mozilla.org/system-info;1");
   MOZ_ASSERT(infoService, "Could not find a system info service");
   nsresult rv;
+
   // Add the Android version number to the Fennec platform identifier.
   nsAutoString androidVersion;
   rv = infoService->GetPropertyAsAString(u"release_version"_ns, androidVersion);
-  if (NS_SUCCEEDED(rv)) {
-    mPlatform += " ";
+  MOZ_ASSERT_IF(
+      NS_SUCCEEDED(rv),
+      // Like version "9"
+      (androidVersion.Length() == 1 && std::isdigit(androidVersion[0])) ||
+          // Or like version "8.1", "10", or "12.1"
+          (androidVersion.Length() >= 2 && std::isdigit(androidVersion[0]) &&
+           (androidVersion[1] == u'.' || std::isdigit(androidVersion[1]))));
+
+  // Spoof version "Android 10" for Android OS versions < 10 to reduce their
+  // fingerprintable user information. For Android OS versions >= 10, report
+  // the real OS version because some enterprise websites only want to permit
+  // clients with recent OS version (like bug 1876742). Two leading digits
+  // in the version string means the version number is >= 10.
+  mPlatform += " ";
+  if (NS_SUCCEEDED(rv) && androidVersion.Length() >= 2 &&
+      std::isdigit(androidVersion[0]) && std::isdigit(androidVersion[1])) {
     mPlatform += NS_LossyConvertUTF16toASCII(androidVersion);
+  } else {
+    mPlatform.AppendLiteral("10");
   }
 
   // Add the `Mobile` or `TV` token when running on device.
@@ -1350,11 +1382,6 @@ void nsHttpHandler::PrefsChanged(const char* pref) {
     if (NS_SUCCEEDED(rv)) mEnableAltSvcOE = cVar;
   }
 
-  if (PREF_CHANGED(HTTP_PREF("originextension"))) {
-    rv = Preferences::GetBool(HTTP_PREF("originextension"), &cVar);
-    if (NS_SUCCEEDED(rv)) mEnableOriginExtension = cVar;
-  }
-
   if (PREF_CHANGED(HTTP_PREF("http2.push-allowance"))) {
     mSpdyPushAllowance = static_cast<uint32_t>(
         clamped(StaticPrefs::network_http_http2_push_allowance(), 1024,
@@ -1736,7 +1763,7 @@ void nsHttpHandler::PrefsChanged(const char* pref) {
     }
 
     if (userSetDocumentAcceptHeader.IsEmpty()) {
-      mDocumentAcceptHeader.Assign(DocumentAcceptHeader(mImageAcceptHeader));
+      mDocumentAcceptHeader.Assign(DocumentAcceptHeader());
     } else {
       mDocumentAcceptHeader.Assign(userSetDocumentAcceptHeader);
     }
@@ -2204,12 +2231,8 @@ nsresult nsHttpHandler::SpeculativeConnectInternal(
     originAttributes = std::move(aOriginAttributes.ref());
   } else if (aPrincipal) {
     originAttributes = aPrincipal->OriginAttributesRef();
-    StoragePrincipalHelper::UpdateOriginAttributesForNetworkState(
-        aURI, originAttributes);
   } else if (loadContext) {
     loadContext->GetOriginAttributes(originAttributes);
-    StoragePrincipalHelper::UpdateOriginAttributesForNetworkState(
-        aURI, originAttributes);
   }
 
   nsCOMPtr<nsIURI> clone;
@@ -2220,6 +2243,15 @@ nsresult nsHttpHandler::SpeculativeConnectInternal(
       // (NOTE: We better make sure |clone| stays alive until the end
       // of the function now, since our aURI arg now points to it!)
     }
+  }
+
+  if (!aOriginAttributes) {
+    // We must update the originAttributes with the network state first party
+    // domain **after** we upgrade aURI to https.
+    // Otherwise the speculative connection will be keyed by a http URL
+    // and end up not being used.
+    StoragePrincipalHelper::UpdateOriginAttributesForNetworkState(
+        aURI, originAttributes);
   }
 
   nsAutoCString scheme;

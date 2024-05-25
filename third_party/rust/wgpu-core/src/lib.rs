@@ -50,7 +50,6 @@
     unused_qualifications
 )]
 
-pub mod any_surface;
 pub mod binding_model;
 pub mod command;
 mod conv;
@@ -64,7 +63,9 @@ pub mod id;
 pub mod identity;
 mod init_tracker;
 pub mod instance;
+mod lock;
 pub mod pipeline;
+mod pipeline_cache;
 mod pool;
 pub mod present;
 pub mod registry;

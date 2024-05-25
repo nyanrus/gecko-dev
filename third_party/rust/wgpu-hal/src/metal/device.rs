@@ -112,7 +112,7 @@ impl super::Device {
                 // TODO: support bounds checks on binding arrays
                 binding_array: naga::proc::BoundsCheckPolicy::Unchecked,
             },
-            zero_initialize_workgroup_memory: true,
+            zero_initialize_workgroup_memory: stage.zero_initialize_workgroup_memory,
         };
 
         let pipeline_options = naga::back::msl::PipelineOptions {
@@ -1098,6 +1098,14 @@ impl crate::Device for super::Device {
         })
     }
     unsafe fn destroy_compute_pipeline(&self, _pipeline: super::ComputePipeline) {}
+
+    unsafe fn create_pipeline_cache(
+        &self,
+        _desc: &crate::PipelineCacheDescriptor<'_>,
+    ) -> Result<(), crate::PipelineCacheError> {
+        Ok(())
+    }
+    unsafe fn destroy_pipeline_cache(&self, (): ()) {}
 
     unsafe fn create_query_set(
         &self,

@@ -561,9 +561,18 @@ class WelcomeScreen extends (react__WEBPACK_IMPORTED_MODULE_0___default().PureCo
       let themeToUse = action.theme === "<event>" ? event.currentTarget.value : this.props.initialTheme || action.theme;
       this.props.setActiveTheme(themeToUse);
       if (props.content.tiles?.category?.type === "wallpaper") {
-        let actionWallPaper = props.content.tiles?.category?.action;
-        actionWallPaper.data.pref.value = themeToUse;
-        await _lib_aboutwelcome_utils_mjs__WEBPACK_IMPORTED_MODULE_2__.AboutWelcomeUtils.handleUserAction(actionWallPaper);
+        const theme = themeToUse.split("-")?.[1];
+        let actionWallpaper = {
+          ...props.content.tiles.category.action
+        };
+        actionWallpaper.data.actions.forEach(async wpAction => {
+          if (wpAction.data.pref.name?.includes("dark")) {
+            wpAction.data.pref.value = `dark-${theme}`;
+          } else {
+            wpAction.data.pref.value = `light-${theme}`;
+          }
+          await _lib_aboutwelcome_utils_mjs__WEBPACK_IMPORTED_MODULE_2__.AboutWelcomeUtils.handleUserAction(actionWallpaper);
+        });
       } else {
         window.AWSelectTheme(themeToUse);
       }
@@ -1457,10 +1466,11 @@ __webpack_require__.r(__webpack_exports__);
 
 
 const Themes = props => {
+  const category = props.content.tiles?.category?.type;
   return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement("div", {
     className: "tiles-theme-container"
   }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement("div", null, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement("fieldset", {
-    className: `tiles-theme-section ${props.content.tiles?.category?.type}`
+    className: `tiles-theme-section ${category}`
   }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement(_MSLocalized__WEBPACK_IMPORTED_MODULE_1__.Localized, {
     text: props.content.subtitle
   }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement("legend", {
@@ -1482,7 +1492,7 @@ const Themes = props => {
   }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_0___default().createElement("input", {
     type: "radio",
     value: theme,
-    name: "theme",
+    name: category === "wallpaper" ? theme : "theme",
     checked: theme === props.activeTheme,
     className: "sr-only input",
     onClick: props.handleAction

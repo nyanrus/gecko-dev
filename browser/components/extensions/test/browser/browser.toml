@@ -287,6 +287,8 @@ https_first_disabled = true
 
 ["browser_ext_menus_replace_menu_permissions.js"]
 
+["browser_ext_menus_startup_restored.js"]
+
 ["browser_ext_menus_targetElement.js"]
 
 ["browser_ext_menus_targetElement_extension.js"]
@@ -391,6 +393,8 @@ run-if = ["crashreporter"]
 ["browser_ext_reload_manifest_cache.js"]
 
 ["browser_ext_request_permissions.js"]
+
+["browser_ext_runtime_getContexts.js"]
 
 ["browser_ext_runtime_onPerformanceWarning.js"]
 

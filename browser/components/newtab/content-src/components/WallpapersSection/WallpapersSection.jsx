@@ -4,6 +4,7 @@
 
 import React from "react";
 import { connect } from "react-redux";
+import { actionCreators as ac, actionTypes as at } from "common/Actions.mjs";
 
 export class _WallpapersSection extends React.PureComponent {
   constructor(props) {
@@ -15,34 +16,59 @@ export class _WallpapersSection extends React.PureComponent {
   }
 
   componentDidMount() {
-    this.prefersHighContrastQuery = globalThis.matchMedia(
-      "(forced-colors: active)"
-    );
     this.prefersDarkQuery = globalThis.matchMedia(
       "(prefers-color-scheme: dark)"
-    );
-    [this.prefersHighContrastQuery, this.prefersDarkQuery].forEach(
-      colorTheme => {
-        colorTheme.addEventListener("change", this.handleReset);
-      }
-    );
-  }
-
-  componentWillUnmount() {
-    [this.prefersHighContrastQuery, this.prefersDarkQuery].forEach(
-      colorTheme => {
-        colorTheme.removeEventListener("change", this.handleReset);
-      }
     );
   }
 
   handleChange(event) {
     const { id } = event.target;
-    this.props.setPref("newtabWallpapers.wallpaper", id);
+    const prefs = this.props.Prefs.values;
+    const colorMode = this.prefersDarkQuery?.matches ? "dark" : "light";
+    this.props.setPref(`newtabWallpapers.wallpaper-${colorMode}`, id);
+    this.handleUserEvent({
+      selected_wallpaper: id,
+      hadPreviousWallpaper: !!this.props.activeWallpaper,
+    });
+    // bug 1892095
+    if (
+      prefs["newtabWallpapers.wallpaper-dark"] === "" &&
+      colorMode === "light"
+    ) {
+      this.props.setPref(
+        "newtabWallpapers.wallpaper-dark",
+        id.replace("light", "dark")
+      );
+    }
+
+    if (
+      prefs["newtabWallpapers.wallpaper-light"] === "" &&
+      colorMode === "dark"
+    ) {
+      this.props.setPref(
+        `newtabWallpapers.wallpaper-light`,
+        id.replace("dark", "light")
+      );
+    }
   }
 
   handleReset() {
-    this.props.setPref("newtabWallpapers.wallpaper", "");
+    const colorMode = this.prefersDarkQuery?.matches ? "dark" : "light";
+    this.props.setPref(`newtabWallpapers.wallpaper-${colorMode}`, "");
+    this.handleUserEvent({
+      selected_wallpaper: "none",
+      hadPreviousWallpaper: !!this.props.activeWallpaper,
+    });
+  }
+
+  // Record user interaction when changing wallpaper and reseting wallpaper to default
+  handleUserEvent(data) {
+    this.props.dispatch(
+      ac.OnlyToMain({
+        type: at.WALLPAPER_CLICK,
+        data,
+      })
+    );
   }
 
   render() {
@@ -57,7 +83,7 @@ export class _WallpapersSection extends React.PureComponent {
                 <input
                   onChange={this.handleChange}
                   type="radio"
-                  name="wallpaper"
+                  name={`wallpaper-${title}`}
                   id={title}
                   value={title}
                   checked={title === activeWallpaper}

@@ -323,7 +323,8 @@ static Maybe<nsRect> ComputeTheIntersection(
   //
   // `intersectionRect` is kept relative to `target` during the loop.
   auto inflowRect = nsLayoutUtils::GetAllInFlowRectsUnion(
-      target, target, nsLayoutUtils::RECTS_ACCOUNT_FOR_TRANSFORMS);
+      target, target,
+      nsLayoutUtils::GetAllInFlowRectsFlag::AccountForTransforms);
   // For content-visibility, we need to observe the overflow clip edge,
   // https://drafts.csswg.org/css-contain-2/#close-to-the-viewport
   if (aIsForProximityToViewport ==
@@ -350,7 +351,7 @@ static Maybe<nsRect> ComputeTheIntersection(
       nsLayoutUtils::GetCrossDocParentFrameInProcess(target);
   while (containerFrame && containerFrame != aRoot) {
     // FIXME(emilio): What about other scroll frames that inherit from
-    // nsHTMLScrollFrame but have a different type, like nsListControlFrame?
+    // ScrollContainerFrame but have a different type, like nsListControlFrame?
     // This looks bogus in that case, but different bug.
     if (nsIScrollableFrame* scrollFrame = do_QueryFrame(containerFrame)) {
       if (containerFrame->GetParent() == aRoot && !aRoot->GetParent()) {

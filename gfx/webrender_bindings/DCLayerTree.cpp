@@ -751,9 +751,9 @@ DCSurface* DCExternalSurfaceWrapper::EnsureSurfaceForExternalImage(
     auto cprofileOut = mDCLayerTree->OutputColorProfile();
     bool pretendSrgb = true;
     if (pretendSrgb) {
-      cprofileOut = color::ColorProfileDesc::From({
-          color::Chromaticities::Srgb(),
-          color::PiecewiseGammaDesc::Srgb(),
+      cprofileOut = color::ColorProfileDesc::From(color::ColorspaceDesc{
+          .chrom = color::Chromaticities::Srgb(),
+          .tf = color::PiecewiseGammaDesc::Srgb(),
       });
     }
     const auto conversion = color::ColorProfileConversionDesc::From({
@@ -1189,6 +1189,44 @@ static UINT GetVendorId(ID3D11VideoDevice* const aVideoDevice) {
   adapter->GetDesc(&adapterDesc);
 
   return adapterDesc.VendorId;
+}
+
+struct NvidiaVSRGetData_v1 {
+  UINT vsrGPUisVSRCapable : 1;   // 01/32, 1: GPU is VSR capable
+  UINT vsrOtherFieldsValid : 1;  // 02/32, 1: Other status fields are valid
+  // remaining fields are valid if vsrOtherFieldsValid is set - requires
+  // previous execution of VPBlt with SetStreamExtension for VSR enabled.
+  UINT vsrEnabled : 1;           // 03/32, 1: VSR is enabled
+  UINT vsrIsInUseForThisVP : 1;  // 04/32, 1: VSR is in use by this Video
+                                 // Processor
+  UINT vsrLevel : 3;             // 05-07/32, 0-4 current level
+  UINT vsrReserved : 21;         // 32-07
+};
+
+static void AddProfileMarkerForNvidiaVpSuperResolutionInfo(
+    ID3D11VideoContext* aVideoContext, ID3D11VideoProcessor* aVideoProcessor) {
+  MOZ_ASSERT(profiler_thread_is_being_profiled_for_markers());
+
+  // Undocumented NVIDIA driver constants
+  constexpr GUID nvGUID = {0xD43CE1B3,
+                           0x1F4B,
+                           0x48AC,
+                           {0xBA, 0xEE, 0xC3, 0xC2, 0x53, 0x75, 0xE6, 0xF7}};
+
+  NvidiaVSRGetData_v1 data{};
+  HRESULT hr = aVideoContext->VideoProcessorGetStreamExtension(
+      aVideoProcessor, 0, &nvGUID, sizeof(data), &data);
+
+  if (FAILED(hr)) {
+    return;
+  }
+
+  nsPrintfCString str(
+      "SuperResolution VP Capable %u OtherFieldsValid %u Enabled %u InUse %u "
+      "Level %u",
+      data.vsrGPUisVSRCapable, data.vsrOtherFieldsValid, data.vsrEnabled,
+      data.vsrIsInUseForThisVP, data.vsrLevel);
+  PROFILER_MARKER_TEXT("DCSurfaceVideo", GRAPHICS, {}, str);
 }
 
 static HRESULT SetNvidiaVpSuperResolution(ID3D11VideoContext* aVideoContext,
@@ -1825,6 +1863,11 @@ bool DCSurfaceVideo::CallVideoProcessorBlt() {
     }
   }
 
+  if (profiler_thread_is_being_profiled_for_markers() && vendorId == 0x10DE) {
+    AddProfileMarkerForNvidiaVpSuperResolutionInfo(videoContext,
+                                                   videoProcessor);
+  }
+
   if (mUseVpAutoHDR) {
     PROFILER_MARKER_TEXT("DCSurfaceVideo", GRAPHICS, {}, "SetVpAutoHDR"_ns);
 
@@ -2097,7 +2140,10 @@ void DCLayerTree::DestroyEGLSurface() {
 
 // -
 
-color::ColorProfileDesc DCLayerTree::QueryOutputColorProfile() {
+}  // namespace wr
+namespace gfx {
+
+color::ColorProfileDesc QueryOutputColorProfile() {
   // GPU process can't simply init gfxPlatform, (and we don't need most of it)
   // but we do need gfxPlatform::GetCMSOutputProfile().
   // So we steal what we need through the window:
@@ -2150,6 +2196,9 @@ color::ColorProfileDesc DCLayerTree::QueryOutputColorProfile() {
 
   return ret;
 }
+
+}  // namespace gfx
+namespace wr {
 
 inline D2D1_MATRIX_5X4_F to_D2D1_MATRIX_5X4_F(const color::mat4& m) {
   return D2D1_MATRIX_5X4_F{{{

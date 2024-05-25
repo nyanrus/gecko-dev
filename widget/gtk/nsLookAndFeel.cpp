@@ -800,6 +800,7 @@ nsresult nsLookAndFeel::PerThemeData::GetColor(ColorID aID,
     case ColorID::SpellCheckerUnderline:
     case ColorID::Mark:
     case ColorID::Marktext:
+    case ColorID::MozAutofillBackground:
       aColor = GetStandinForNativeColor(
           aID, mIsDark ? ColorScheme::Dark : ColorScheme::Light);
       break;
@@ -1974,10 +1975,7 @@ void nsLookAndFeel::PerThemeData::Init() {
     mTitlebar = GetColorPair(style, GTK_STATE_FLAG_NORMAL);
     mTitlebarInactive = GetColorPair(style, GTK_STATE_FLAG_BACKDROP);
     mTitlebarRadius = IsSolidCSDStyleUsed() ? 0 : GetBorderRadius(style);
-    // Get titlebar spacing, a default one is 6 pixels (gtk/gtkheaderbar.c)
-    mTitlebarButtonSpacing = 6;
-    g_object_get(GetWidget(MOZ_GTK_HEADER_BAR), "spacing",
-                 &mTitlebarButtonSpacing, nullptr);
+    mTitlebarButtonSpacing = moz_gtk_get_titlebar_button_spacing();
   }
 
   // We special-case the header bar color in Adwaita, Yaru and Breeze to be the

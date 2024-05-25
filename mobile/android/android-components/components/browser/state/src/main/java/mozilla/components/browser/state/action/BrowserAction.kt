@@ -48,6 +48,7 @@ import mozilla.components.concept.engine.search.SearchRequest
 import mozilla.components.concept.engine.translate.Language
 import mozilla.components.concept.engine.translate.LanguageModel
 import mozilla.components.concept.engine.translate.LanguageSetting
+import mozilla.components.concept.engine.translate.ModelManagementOptions
 import mozilla.components.concept.engine.translate.TranslationDownloadSize
 import mozilla.components.concept.engine.translate.TranslationEngineState
 import mozilla.components.concept.engine.translate.TranslationError
@@ -1082,6 +1083,20 @@ sealed class TranslationsAction : BrowserAction() {
     ) : TranslationsAction()
 
     /**
+     * Updates the specified translation language setting on the translation engine and ensures the
+     * final state on the global store remains in-sync.
+     *
+     * See [UpdatePageSettingAction] for updating the language setting on the session store.
+     *
+     * @property languageCode The BCP-47 language code to update.
+     * @property setting The [LanguageSetting] for the language.
+     */
+    data class UpdateLanguageSettingsAction(
+        val languageCode: String,
+        val setting: LanguageSetting,
+    ) : TranslationsAction()
+
+    /**
      * Sets the list of sites that the user has opted to never translate.
      *
      * @property neverTranslateSites The never translate sites.
@@ -1106,6 +1121,16 @@ sealed class TranslationsAction : BrowserAction() {
      */
     data class SetLanguageModelsAction(
         val languageModels: List<LanguageModel>,
+    ) : TranslationsAction()
+
+    /**
+     * Manages the language machine learning translation models the translation engine has available.
+     * Has options for downloading and deleting models.
+     *
+     * @property options The operation to perform to manage the model.
+     */
+    data class ManageLanguageModelsAction(
+        val options: ModelManagementOptions,
     ) : TranslationsAction()
 }
 
@@ -1275,6 +1300,7 @@ sealed class EngineAction : BrowserAction() {
         override val tabId: String,
         val skipLoading: Boolean = false,
         val followupAction: BrowserAction? = null,
+        val includeParent: Boolean = false,
     ) : EngineAction(), ActionWithTab
 
     /**
@@ -1285,6 +1311,7 @@ sealed class EngineAction : BrowserAction() {
         val url: String,
         val flags: EngineSession.LoadUrlFlags = EngineSession.LoadUrlFlags.none(),
         val additionalHeaders: Map<String, String>? = null,
+        val includeParent: Boolean = false,
     ) : EngineAction(), ActionWithTab
 
     /**
@@ -1422,6 +1449,7 @@ sealed class EngineAction : BrowserAction() {
         val engineSession: EngineSession,
         val timestamp: Long = Clock.elapsedRealtime(),
         val skipLoading: Boolean = false,
+        val includeParent: Boolean = false,
     ) : EngineAction(), ActionWithTab
 
     /**

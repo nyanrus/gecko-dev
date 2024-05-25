@@ -265,8 +265,8 @@
         "ShowBlockedResult": {
           "type": "boolean"
         },
-        "DefaultAllow": {
-          "type": "boolean"
+        "DefaultResult": {
+          "type": "number"
         },
         "BypassForSameTabOperations": {
           "type": "boolean"
@@ -839,6 +839,19 @@
       }
     },
 
+    "HttpAllowlist": {
+      "type": "array",
+      "strict": false,
+      "items": {
+        "type": "origin"
+      }
+    },
+
+    "HttpsOnlyMode": {
+      "type": "string",
+      "enum": ["allowed", "disallowed", "enabled", "force_enabled"]
+    },
+
     "InstallAddonsPermission": {
       "type": "object",
       "properties": {
@@ -1185,6 +1198,10 @@
           "type": "boolean"
         }
       }
+    },
+
+    "PostQuantumKeyAgreementEnabled": {
+      "type": "boolean"
     },
 
     "Preferences": {

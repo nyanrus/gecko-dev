@@ -209,11 +209,9 @@ void OOPInit();
 // Return true if a dump was found for |childPid|, and return the
 // path in |dump|.  The caller owns the last reference to |dump| if it
 // is non-nullptr. The annotations for the crash will be stored in
-// |aAnnotations|. The sequence parameter will be filled with an ordinal
-// indicating which remote process crashed first.
+// |aAnnotations|.
 bool TakeMinidumpForChild(uint32_t childPid, nsIFile** dump,
-                          AnnotationTable& aAnnotations,
-                          uint32_t* aSequence = nullptr);
+                          AnnotationTable& aAnnotations);
 
 /**
  * If a dump was found for |childPid| then write a minimal .extra file to
@@ -284,28 +282,6 @@ bool CreateMinidumpsAndPair(ProcessHandle aTargetPid,
 // Parent-side API for children
 const char* GetChildNotificationPipe();
 
-#  ifdef MOZ_CRASHREPORTER_INJECTOR
-// Inject a crash report client into an arbitrary process, and inform the
-// callback object when it crashes. Parent process only.
-
-class InjectorCrashCallback {
- public:
-  InjectorCrashCallback() {}
-
-  /**
-   * Inform the callback of a crash. The client code should call
-   * TakeMinidumpForChild to remove it from the PID mapping table.
-   *
-   * The callback will not be fired if the client has already called
-   * TakeMinidumpForChild for this process ID.
-   */
-  virtual void OnCrash(DWORD processID) = 0;
-};
-
-// This method implies OOPInit
-void InjectCrashReporterIntoProcess(DWORD processID, InjectorCrashCallback* cb);
-void UnregisterInjectorCallback(DWORD processID);
-#  endif
 #else
 // Parent-side API for children
 

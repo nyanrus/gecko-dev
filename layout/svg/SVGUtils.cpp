@@ -34,6 +34,7 @@
 #include "mozilla/FilterInstance.h"
 #include "mozilla/ISVGDisplayableFrame.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/StaticPrefs_svg.h"
 #include "mozilla/SVGClipPathFrame.h"
 #include "mozilla/SVGContainerFrame.h"
@@ -513,7 +514,7 @@ class MixModeBlender {
 
     gfxContextAutoSaveRestore save(mSourceCtx);
     mSourceCtx->SetMatrix(Matrix());  // This will be restored right after.
-    RefPtr<gfxPattern> pattern = new gfxPattern(
+    auto pattern = MakeRefPtr<gfxPattern>(
         targetSurf, Matrix::Translation(mTargetOffset.x, mTargetOffset.y));
     mSourceCtx->SetPattern(pattern);
     mSourceCtx->Paint();

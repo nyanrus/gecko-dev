@@ -2,7 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-sidebar-launcher-insights =
+sidebar-main-insights =
     .title = Insights
 
 ## Variables:
@@ -24,3 +24,23 @@ sidebar-history-date-prev-month =
 #   $query (String) - The search query used for searching through browser history.
 sidebar-search-results-header =
   .heading = Search results for “{ $query }”
+
+sidebar-menu-customize =
+  .title = Customize sidebar
+sidebar-customize-header = Customize sidebar
+sidebar-customize-firefox-tools = { -brand-product-name } tools
+sidebar-customize-history = History
+sidebar-customize-synced-tabs = Tabs from other devices
+sidebar-customize-bookmarks = Bookmarks
+
+## Labels for sidebar context menu items
+
+sidebar-context-menu-manage-extension =
+  .label = Manage extension
+sidebar-context-menu-remove-extension =
+  .label = Remove extension
+sidebar-context-menu-report-extension =
+  .label = Report extension
+
+# A header for a list of sidebar-specific extensions in the sidebar
+sidebar-customize-extensions = Sidebar extensions

@@ -27,7 +27,6 @@
 
 // We expose a singleton from this module. Some tests may import the
 // constructor via a backstage pass.
-import { FirefoxRelayTelemetry } from "resource://gre/modules/FirefoxRelayTelemetry.mjs";
 import { FormAutofill } from "resource://autofill/FormAutofill.sys.mjs";
 import { FormAutofillUtils } from "resource://gre/modules/shared/FormAutofillUtils.sys.mjs";
 
@@ -48,8 +47,11 @@ ChromeUtils.defineLazyGetter(lazy, "log", () =>
   FormAutofill.defineLogGetter(lazy, "FormAutofillParent")
 );
 
-const { ENABLED_AUTOFILL_ADDRESSES_PREF, ENABLED_AUTOFILL_CREDITCARDS_PREF } =
-  FormAutofill;
+const {
+  ENABLED_AUTOFILL_ADDRESSES_PREF,
+  ENABLED_AUTOFILL_CREDITCARDS_PREF,
+  AUTOFILL_CREDITCARDS_REAUTH_PREF,
+} = FormAutofill;
 
 const { ADDRESSES_COLLECTION_NAME, CREDITCARDS_COLLECTION_NAME } =
   FormAutofillUtils;
@@ -275,14 +277,11 @@ export class FormAutofillParent extends JSWindowActorParent {
         await this._onFormSubmit(data);
         break;
       }
-      case "FormAutofill:OpenPreferences": {
-        const win = lazy.BrowserWindowTracker.getTopWindow();
-        win.openPreferences("privacy-form-autofill");
-        break;
-      }
       case "FormAutofill:GetDecryptedString": {
         let { cipherText, reauth } = data;
-        if (!FormAutofillUtils._reauthEnabledByUser) {
+        if (
+          !FormAutofillUtils.getOSAuthEnabled(AUTOFILL_CREDITCARDS_REAUTH_PREF)
+        ) {
           lazy.log.debug("Reauth is disabled");
           reauth = false;
         }
@@ -318,7 +317,9 @@ export class FormAutofillParent extends JSWindowActorParent {
         break;
       }
       case "FormAutofill:SaveCreditCard": {
-        if (!(await FormAutofillUtils.ensureLoggedIn()).authenticated) {
+        // Setting the first parameter of OSKeyStore.ensurLoggedIn as false
+        // since this case only called in tests. Also the reason why we're not calling FormAutofill.verifyUserOSAuth.
+        if (!(await lazy.OSKeyStore.ensureLoggedIn(false)).authenticated) {
           lazy.log.warn("User canceled encryption login");
           return undefined;
         }
@@ -337,21 +338,6 @@ export class FormAutofillParent extends JSWindowActorParent {
         );
         break;
       }
-      case "PasswordManager:offerRelayIntegration": {
-        FirefoxRelayTelemetry.recordRelayOfferedEvent(
-          "clicked",
-          data.telemetry.flowId,
-          data.telemetry.scenarioName
-        );
-        return this.#offerRelayIntegration();
-      }
-      case "PasswordManager:generateRelayUsername": {
-        FirefoxRelayTelemetry.recordRelayUsernameFilledEvent(
-          "clicked",
-          data.telemetry.flowId
-        );
-        return this.#generateRelayUsername();
-      }
     }
 
     return undefined;
@@ -361,20 +347,6 @@ export class FormAutofillParent extends JSWindowActorParent {
     return lazy.LoginHelper.getLoginOrigin(
       this.manager.documentPrincipal?.originNoSuffix
     );
-  }
-
-  getRootBrowser() {
-    return this.browsingContext.topFrameElement;
-  }
-
-  async #offerRelayIntegration() {
-    const browser = this.getRootBrowser();
-    return lazy.FirefoxRelay.offerRelayIntegration(browser, this.formOrigin);
-  }
-
-  async #generateRelayUsername() {
-    const browser = this.getRootBrowser();
-    return lazy.FirefoxRelay.generateUsername(browser, this.formOrigin);
   }
 
   notifyMessageObservers(callbackName, data) {
@@ -695,5 +667,35 @@ export class FormAutofillParent extends JSWindowActorParent {
     }
 
     return true;
+  }
+
+  onAutoCompleteEntryHovered(message, data) {
+    if (message == "FormAutofill:FillForm") {
+      this.sendAsyncMessage("FormAutofill:PreviewProfile", data);
+    } else {
+      // Make sure the preview is cleared when users select an entry
+      // that doesn't support preview.
+      this.sendAsyncMessage("FormAutofill:PreviewProfile", null);
+    }
+  }
+
+  onAutoCompleteEntrySelected(message, data) {
+    switch (message) {
+      case "FormAutofill:OpenPreferences": {
+        const win = lazy.BrowserWindowTracker.getTopWindow();
+        win.openPreferences("privacy-form-autofill");
+        break;
+      }
+
+      case "FormAutofill:ClearForm":
+      case "FormAutofill:FillForm": {
+        this.sendAsyncMessage(message, data);
+        break;
+      }
+      default: {
+        lazy.log.debug("Unsupported autocomplete message:", message);
+        break;
+      }
+    }
   }
 }

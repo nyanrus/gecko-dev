@@ -111,7 +111,7 @@ class nsContextMenu {
    * A promise to retrieve the translations language pair
    * if the context menu was opened in a context relevant to
    * open the SelectTranslationsPanel.
-   * @type {Promise<{fromLang: string, toLang: string}>}
+   * @type {Promise<{fromLanguage: string, toLanguage: string}>}
    */
   #translationsLangPairPromise;
 
@@ -1347,8 +1347,6 @@ class nsContextMenu {
       !this.onTextInput &&
       !this.onLink &&
       !this.onPlainTextLink &&
-      !this.onImage &&
-      !this.onVideo &&
       !this.onAudio &&
       !this.onEditable &&
       !this.onPassword;
@@ -1685,7 +1683,7 @@ class nsContextMenu {
 
   // Change current window to the URL of the image, video, or audio.
   viewMedia(e) {
-    let where = whereToOpenLink(e, false, false);
+    let where = BrowserUtils.whereToOpenLink(e, false, false);
     if (where == "current") {
       where = "tab";
     }
@@ -2336,8 +2334,8 @@ class nsContextMenu {
     try {
       strippedLinkURI = QueryStringStripper.stripForCopyOrShare(this.linkURI);
     } catch (e) {
-      console.warn(`isLinkURIStrippable: ${e.message}`);
-      return null;
+      console.warn(`stripForCopyOrShare: ${e.message}`);
+      return this.linkURI;
     }
 
     // If nothing can be stripped, we return the original URI
@@ -2499,7 +2497,7 @@ class nsContextMenu {
     let drmInfoURL =
       Services.urlFormatter.formatURLPref("app.support.baseURL") +
       "drm-content";
-    let dest = whereToOpenLink(aEvent);
+    let dest = BrowserUtils.whereToOpenLink(aEvent);
     // Don't ever want this to open in the same tab as it'll unload the
     // DRM'd video, which is going to be a bad idea in most cases.
     if (dest == "current") {
@@ -2554,9 +2552,9 @@ class nsContextMenu {
    * @returns {Promise<void>}
    */
   async localizeTranslateSelectionItem(translateSelectionItem) {
-    const { toLang } = await this.#translationsLangPairPromise;
+    const { toLanguage } = await this.#translationsLangPairPromise;
 
-    if (toLang) {
+    if (toLanguage) {
       // A valid to-language exists, so localize the menuitem for that language.
       let displayName;
 
@@ -2564,7 +2562,7 @@ class nsContextMenu {
         const displayNames = new Services.intl.DisplayNames(undefined, {
           type: "language",
         });
-        displayName = displayNames.of(toLang);
+        displayName = displayNames.of(toLanguage);
       } catch {
         // Services.intl.DisplayNames.of threw, do nothing.
       }

@@ -3,11 +3,15 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#include <array>
+#include <cstddef>
+#include <vector>
 
 #include "benchmark/benchmark.h"
+#include "lib/jxl/base/rect.h"
+#include "lib/jxl/chroma_from_luma.h"
 #include "lib/jxl/image_ops.h"
 #include "lib/jxl/splines.h"
+#include "tools/no_memory_manager.h"
 
 namespace jxl {
 namespace {
@@ -38,7 +42,9 @@ void BM_Splines(benchmark::State& state) {
   Splines splines(kQuantizationAdjustment, std::move(quantized_splines),
                   std::move(starting_points));
 
-  JXL_ASSIGN_OR_DIE(Image3F drawing_area, Image3F::Create(320, 320));
+  JXL_ASSIGN_OR_DIE(
+      Image3F drawing_area,
+      Image3F::Create(jpegxl::tools::NoMemoryManager(), 320, 320));
   ZeroFillImage(&drawing_area);
   for (auto _ : state) {
     for (size_t i = 0; i < n; ++i) {

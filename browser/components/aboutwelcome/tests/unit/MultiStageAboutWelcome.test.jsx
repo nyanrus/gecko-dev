@@ -396,9 +396,26 @@ describe("MultiStageAboutWelcome module", () => {
               category: {
                 type: "wallpaper",
                 action: {
-                  type: "SET_PREF",
+                  type: "MULTI_ACTION",
                   data: {
-                    pref: { name: "test.pref" },
+                    actions: [
+                      {
+                        type: "SET_PREF",
+                        data: {
+                          pref: {
+                            name: "test-dark",
+                          },
+                        },
+                      },
+                      {
+                        type: "SET_PREF",
+                        data: {
+                          pref: {
+                            name: "test-light",
+                          },
+                        },
+                      },
+                    ],
                   },
                 },
               },
@@ -425,19 +442,10 @@ describe("MultiStageAboutWelcome module", () => {
       it("should handle wallpaper click", () => {
         const wrapper = mount(<WelcomeScreen {...WALLPAPER_SCREEN_PROPS} />);
         const wallpaperOptions = wrapper.find(
-          ".tiles-theme-section .theme input[name='theme']"
+          ".tiles-theme-section .theme input[name='mountain']"
         );
         wallpaperOptions.simulate("click");
-        assert.calledOnce(AboutWelcomeUtils.handleUserAction);
-        assert.calledWith(AboutWelcomeUtils.handleUserAction, {
-          data: {
-            pref: {
-              name: "test.pref",
-              value: "mountain",
-            },
-          },
-          type: "SET_PREF",
-        });
+        assert.calledTwice(AboutWelcomeUtils.handleUserAction);
       });
     });
 

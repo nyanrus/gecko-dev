@@ -5,7 +5,6 @@
 
 add_task(async function () {
   await pushPref("layout.css.backdrop-filter.enabled", true);
-  await pushPref("layout.css.individual-transform.enabled", true);
   await addTab("about:blank");
   await performTest();
   gBrowser.removeCurrentTab();
@@ -15,6 +14,7 @@ async function performTest() {
   await SpecialPowers.pushPrefEnv({
     set: [["security.allow_unsafe_parent_loads", true]],
   });
+  await pushPref("layout.css.relative-color-syntax.enabled", true);
 
   const OutputParser = require("resource://devtools/client/shared/output-parser.js");
 
@@ -252,6 +252,42 @@ function testParseCssProperty(doc, parser) {
         { name: "rgba(255, 255, 0, 0.9)", colorFunction: "color-mix" },
         "), ",
         { name: "blue", colorFunction: "linear-gradient" },
+        ")",
+      ]
+    ),
+
+    makeColorTest("color", "rgb(from gold r g b)", [
+      { name: "rgb(from gold r g b)" },
+    ]),
+
+    makeColorTest("color", "color(from hsl(0 100% 50%) xyz x y 0.5)", [
+      { name: "color(from hsl(0 100% 50%) xyz x y 0.5)" },
+    ]),
+
+    makeColorTest(
+      "color",
+      "oklab(from red calc(l - 1) calc(a * 2) calc(b + 3) / alpha)",
+      [{ name: "oklab(from red calc(l - 1) calc(a * 2) calc(b + 3) / alpha)" }]
+    ),
+
+    makeColorTest(
+      "color",
+      "rgb(from color-mix(in lch, plum 40%, pink) r g b)",
+      [{ name: "rgb(from color-mix(in lch, plum 40%, pink) r g b)" }]
+    ),
+
+    makeColorTest("color", "rgb(from rgb(from gold r g b) r g b)", [
+      { name: "rgb(from rgb(from gold r g b) r g b)" },
+    ]),
+
+    makeColorTest(
+      "background-image",
+      "linear-gradient(to right, #F60 10%, rgb(from gold r g b))",
+      [
+        "linear-gradient(to right, ",
+        { name: "#F60", colorFunction: "linear-gradient" },
+        " 10%, ",
+        { name: "rgb(from gold r g b)", colorFunction: "linear-gradient" },
         ")",
       ]
     ),
@@ -687,6 +723,25 @@ function testParseVariable(doc, parser) {
         "</span>",
     },
     {
+      text: "rgba(from var(--base) r g 0 / calc(var(--a) * 0.5))",
+      variables: { "--base": "red", "--a": "0.8" },
+      expected:
+        // prettier-ignore
+        '<span data-color="rgba(from red r g 0 / calc(0.8 * 0.5))">' +
+          "<span>rgba("+
+            "from " +
+            "<span>" +
+              'var(<span data-variable="--base = red">--base</span>)' +
+            "</span> r g 0 / " +
+            "calc(" +
+            "<span>" +
+              'var(<span data-variable="--a = 0.8">--a</span>)' +
+            "</span>" +
+            " * 0.5)" +
+          ")</span>" +
+        "</span>",
+    },
+    {
       text: "rgb(var(--not-seen, 255), 0, 0)",
       variables: {},
       expected:
@@ -699,6 +754,22 @@ function testParseVariable(doc, parser) {
             ")</span>, 0, 0" +
           ")</span>" +
         "</span>",
+    },
+    {
+      text: "rgb(var(--not-seen), 0, 0)",
+      variables: {},
+      expected:
+        // prettier-ignore
+        `rgb(` +
+          `<span>` +
+            `var(` +
+              `<span class="unmatched-class" data-variable="--not-seen is not set">` +
+                `--not-seen` +
+              `</span>` +
+            `)` +
+          `</span>` +
+          `, 0, 0` +
+        `)`,
     },
   ];
 

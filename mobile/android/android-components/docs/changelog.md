@@ -4,17 +4,40 @@ title: Changelog
 permalink: /changelog/
 ---
 
-# 127.0 (In Development)
+# 128.0 (In Development)
+
+* **browser-toolbar**
+  * Added new data classes `CustomTabsToolbarButtonConfig` and `CustomTabsToolbarListeners` to `CustomTabsToolbarFeature`, see [Bug 1897811](https://bugzilla.mozilla.org/show_bug.cgi?id=1897811).
+  * Added new parameters for `showRefreshButton` and `showMenu` to `CustomTabsToolbarButtonConfig`, see [Bug 1897811](https://bugzilla.mozilla.org/show_bug.cgi?id=1897811).
+  * Added a new parameter for `refreshListener` and moved `shareListener` to `CustomTabsToolbarListeners`, see [Bug 1897811](https://bugzilla.mozilla.org/show_bug.cgi?id=1897811).
+
+# 127.0
 
 * **feature-prompts** **browser-storage-sync**
   * A new `isLoginAutofillEnabled` callback is available in `PromptFeature` and `GeckoLoginStorageDelegate` to allow clients controlling whether saved logins should be autofilled or not. Default is false
+
+* **browser-state**
+  * Added `TabSessionState.getUrl()` extension function that will return the URL that could be
+    used for various features such as bookmarks or share regardless of the mode the browser is in (e.g. Reader mode). [Bug 1885628](https://bugzilla.mozilla.org/show_bug.cgi?id=1885628).
 
 * **support-base**
   * Added `StartForegroundService` to safely start a foreground service, see [Bug 1839039](https://bugzilla.mozilla.org/show_bug.cgi?id=1839039) for crash reference.
   * Added `ProcessInfoProvider` and `BuildVersionProvider` to get information about the app process and the build version.
 
+* **support-utils**
+  * Added `DebouncedQueue`, a queue that manages function execution with a debounce mechanism.
+
 * **browser-engine-gecko**
     * For screenshot capture, include exception in failure result rather than throwing.
+
+* **feature-accounts-push**
+    * 🆕 New `CloseTabsFeature` for closing tabs on this device from other devices that are signed to the same Mozilla account.
+    * 🆕 New `CloseTabsUseCase` for closing tabs on other devices from this device.
+
+* **concept-sync**
+    * 🆕 New `DeviceCapability.CLOSE_TABS` variant to indicate that a device supports closing synced tabs.
+    * 🆕 New `DeviceCommandIncoming.TabsClosed` variant to represent a "close synced tabs" command received from another device.
+    * 🆕 New `DeviceCommandOutgoing.CloseTab` variant to represent a "close synced tabs" sent to another device.
 
 # 126.0
 

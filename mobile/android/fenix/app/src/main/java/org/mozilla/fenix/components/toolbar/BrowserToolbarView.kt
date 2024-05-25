@@ -6,6 +6,7 @@ package org.mozilla.fenix.components.toolbar
 
 import android.content.Context
 import android.graphics.Color
+import android.net.Uri
 import android.view.HapticFeedbackConstants
 import android.view.LayoutInflater
 import android.view.View
@@ -29,6 +30,7 @@ import mozilla.components.concept.toolbar.ScrollableToolbar
 import mozilla.components.support.ktx.util.URLStringUtils
 import mozilla.components.ui.widgets.behavior.EngineViewScrollingBehavior
 import org.mozilla.fenix.R
+import org.mozilla.fenix.browser.tabstrip.isTabStripEnabled
 import org.mozilla.fenix.components.toolbar.interactor.BrowserToolbarInteractor
 import org.mozilla.fenix.customtabs.CustomTabToolbarIntegration
 import org.mozilla.fenix.customtabs.CustomTabToolbarMenu
@@ -43,7 +45,7 @@ import mozilla.components.ui.widgets.behavior.ViewPosition as MozacToolbarPositi
 
 @SuppressWarnings("LargeClass", "LongParameterList")
 class BrowserToolbarView(
-    context: Context,
+    private val context: Context,
     container: ViewGroup,
     private val settings: Settings,
     private val interactor: BrowserToolbarInteractor,
@@ -68,7 +70,7 @@ class BrowserToolbarView(
     var view: BrowserToolbar = layout
         .findViewById(R.id.toolbar)
 
-    private val tabStripView: ComposeView by lazy { layout.findViewById(R.id.tabStripView) }
+    private val isNavBarEnabled = IncompleteRedesignToolbarFeature(context.settings()).isEnabled
 
     val toolbarIntegration: ToolbarIntegration
     val menuToolbar: ToolbarMenu
@@ -82,8 +84,8 @@ class BrowserToolbarView(
         container.addView(layout)
         val isCustomTabSession = customTabSession != null
 
-        if (shouldShowTabStrip()) {
-            tabStripView.apply {
+        if (toolbarLayout == R.layout.component_browser_top_toolbar_with_tab_strip) {
+            layout.findViewById<ComposeView>(R.id.tabStripView).apply {
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
                 setContent {
                     tabStripContent()
@@ -101,9 +103,11 @@ class BrowserToolbarView(
             true
         }
 
+        view.isNavBarEnabled = isNavBarEnabled
+
         with(context) {
             val isPinningSupported = components.useCases.webAppUseCases.isPinningSupported()
-            val searchUrlBackground = if (IncompleteRedesignToolbarFeature(context.settings()).isEnabled) {
+            val searchUrlBackground = if (isNavBarEnabled) {
                 R.drawable.search_url_background
             } else {
                 R.drawable.search_old_url_background
@@ -150,7 +154,13 @@ class BrowserToolbarView(
                     ThemeManager.resolveAttribute(R.attr.borderToolbarDivider, context),
                 )
 
-                display.urlFormatter = { url -> URLStringUtils.toDisplayUrl(url) }
+                display.urlFormatter = { url ->
+                    if (isNavBarEnabled) {
+                        Uri.parse(url.toString()).host ?: url
+                    } else {
+                        URLStringUtils.toDisplayUrl(url)
+                    }
+                }
 
                 display.colors = display.colors.copy(
                     text = primaryTextColor,
@@ -211,8 +221,6 @@ class BrowserToolbarView(
                     isPrivate = customTabSession.content.private,
                 )
             } else {
-                val isNavBarEnabled = IncompleteRedesignToolbarFeature(context.settings()).isEnabled
-
                 DefaultToolbarIntegration(
                     this,
                     view,
@@ -322,5 +330,5 @@ class BrowserToolbarView(
     }
 
     private fun shouldShowTabStrip() =
-        customTabSession == null && settings.isTabletAndTabStripEnabled
+        customTabSession == null && context.isTabStripEnabled()
 }

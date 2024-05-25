@@ -13,7 +13,6 @@ use crate::SwapChainId;
 use wgc::{id, identity::IdentityManager};
 use wgt::{Backend, TextureFormat};
 
-pub use wgc::command::{compute_ffi::*, render_ffi::*};
 use wgc::id::markers;
 
 use parking_lot::Mutex;
@@ -69,6 +68,7 @@ impl ProgrammableStageDescriptor {
             module: self.module,
             entry_point: cow_label(&self.entry_point),
             constants: Cow::Owned(constants),
+            zero_initialize_workgroup_memory: true,
         }
     }
 }
@@ -1260,6 +1260,7 @@ pub unsafe extern "C" fn wgpu_client_create_compute_pipeline(
         label,
         layout: desc.layout,
         stage: desc.stage.to_wgpu(),
+        cache: None,
     };
 
     let implicit = match desc.layout {
@@ -1314,6 +1315,7 @@ pub unsafe extern "C" fn wgpu_client_create_render_pipeline(
         depth_stencil: desc.depth_stencil.cloned(),
         multisample: desc.multisample.clone(),
         multiview: None,
+        cache: None,
     };
 
     let implicit = match desc.layout {

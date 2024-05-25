@@ -173,6 +173,24 @@ def enable_decorators(value):
 set_config("ENABLE_DECORATORS", enable_decorators)
 set_define("ENABLE_DECORATORS", enable_decorators)
 
+# Enable explicit resource management
+# ===================================================
+option(
+    "--enable-explicit-resource-management",
+    default=False,
+    help="Enable explicit resource management",
+)
+
+
+@depends("--enable-explicit-resource-management")
+def enable_explicit_resource_management(value):
+    if value:
+        return True
+
+
+set_config("ENABLE_EXPLICIT_RESOURCE_MANAGEMENT", enable_explicit_resource_management)
+set_define("ENABLE_EXPLICIT_RESOURCE_MANAGEMENT", enable_explicit_resource_management)
+
 
 # Enable JSON.parse with source
 # ===================================================
@@ -1263,12 +1281,22 @@ set_define(
 
 # ECMAScript Internationalization API Support (uses ICU)
 # ======================================================
-system_lib_option("--with-system-icu", help="Use system ICU")
+system_lib_option(
+    "--with-system-icu",
+    help="Use system ICU",
+    when=use_pkg_config,
+)
+
+
+@depends("--with-system-icu", when=use_pkg_config)
+def enable_system_icu_option(enable_system_icu):
+    return enable_system_icu
+
 
 system_icu = pkg_check_modules("MOZ_ICU", "icu-i18n >= 73.1", when="--with-system-icu")
 
 
-@depends("--with-system-icu")
+@depends(enable_system_icu_option)
 def in_tree_icu(system_icu):
     return not system_icu
 
@@ -1443,7 +1471,7 @@ with only_when(compile_environment & depends(target.os)(lambda os: os != "WINNT"
             includes=["langinfo.h"],
             body="char* cs = nl_langinfo(CODESET);",
             check_msg="for nl_langinfo and CODESET",
-            when=building_with_gnu_cc,
+            when=building_with_gnu_compatible_cc,
         ),
     )
 

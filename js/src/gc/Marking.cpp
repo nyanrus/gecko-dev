@@ -331,12 +331,20 @@ static bool ShouldTraceCrossCompartment(JSTracer* trc, JSObject* src,
 
 #ifdef DEBUG
 
-inline void js::gc::AssertShouldMarkInZone(GCMarker* marker, Cell* thing) {
-  if (!thing->isMarkedBlack()) {
-    Zone* zone = thing->zone();
-    MOZ_ASSERT(zone->isAtomsZone() ||
-               zone->shouldMarkInZone(marker->markColor()));
+template <typename T>
+void js::gc::AssertShouldMarkInZone(GCMarker* marker, T* thing) {
+  if (thing->isMarkedBlack()) {
+    return;
   }
+
+  // Allow marking marking atoms if we're not collected the atoms zone, except
+  // for symbols which may entrain other GC things if they're used as weakmap
+  // keys.
+  bool allowAtoms = !std::is_same_v<T, JS::Symbol>;
+
+  Zone* zone = thing->zone();
+  MOZ_ASSERT(zone->shouldMarkInZone(marker->markColor()) ||
+             (allowAtoms && zone->isAtomsZone()));
 }
 
 void js::gc::AssertRootMarkingPhase(JSTracer* trc) {
@@ -757,6 +765,8 @@ template <>
 struct TypeCanHaveImplicitEdges<JSObject> : std::true_type {};
 template <>
 struct TypeCanHaveImplicitEdges<BaseScript> : std::true_type {};
+template <>
+struct TypeCanHaveImplicitEdges<JS::Symbol> : std::true_type {};
 
 template <typename T>
 void GCMarker::markImplicitEdges(T* markedThing) {
@@ -797,6 +807,9 @@ void GCMarker::markImplicitEdges(T* markedThing) {
 
 template void GCMarker::markImplicitEdges(JSObject*);
 template void GCMarker::markImplicitEdges(BaseScript*);
+#ifdef NIGHTLY_BUILD
+template void GCMarker::markImplicitEdges(JS::Symbol*);
+#endif
 
 }  // namespace js
 
@@ -873,6 +886,9 @@ static void TraceEdgeForBarrier(GCMarker* gcmarker, TenuredCell* thing,
     MOZ_ASSERT(ShouldMark(gcmarker, thing));
     CheckTracedThing(gcmarker->tracer(), thing);
     AutoClearTracingSource acts(gcmarker->tracer());
+#ifdef DEBUG
+    AutoSetThreadIsMarking threadIsMarking;
+#endif  // DEBUG
     gcmarker->markAndTraverse<NormalMarkingOptions>(thing);
   });
 }
@@ -1014,6 +1030,11 @@ void GCMarker::traverse(GetterSetter* thing) {
 }
 template <uint32_t opts>
 void GCMarker::traverse(JS::Symbol* thing) {
+#ifdef NIGHTLY_BUILD
+  if constexpr (bool(opts & MarkingOptions::MarkImplicitEdges)) {
+    markImplicitEdges(thing);
+  }
+#endif
   traceChildren<opts>(thing);
 }
 template <uint32_t opts>
@@ -1165,6 +1186,13 @@ template <uint32_t opts, typename T>
 bool js::GCMarker::mark(T* thing) {
   if (!thing->isTenured()) {
     return false;
+  }
+
+  // Don't mark symbols if we're not collecting the atoms zone.
+  if constexpr (std::is_same_v<T, JS::Symbol>) {
+    if (!thing->zone()->isGCMarkingOrVerifyingPreBarriers()) {
+      return false;
+    }
   }
 
   AssertShouldMarkInZone(this, thing);
@@ -1379,7 +1407,10 @@ void GCMarker::updateRangesAtStartOfSlice() {
   for (MarkStackIter iter(stack); !iter.done(); iter.next()) {
     if (iter.isSlotsOrElementsRange()) {
       MarkStack::SlotsOrElementsRange& range = iter.slotsOrElementsRange();
-      if (range.kind() == SlotsOrElementsKind::Elements) {
+      JSObject* obj = range.ptr().asRangeObject();
+      if (!obj->is<NativeObject>()) {
+        range.setEmpty();
+      } else if (range.kind() == SlotsOrElementsKind::Elements) {
         NativeObject* obj = &range.ptr().asRangeObject()->as<NativeObject>();
         size_t index = range.start();
         size_t numShifted = obj->getElementsHeader()->numShiftedElements();
@@ -1650,6 +1681,8 @@ inline MarkStack::TaggedPtr::TaggedPtr(Tag tag, Cell* ptr)
   assertValid();
 }
 
+inline uintptr_t MarkStack::TaggedPtr::asBits() const { return bits; }
+
 inline uintptr_t MarkStack::TaggedPtr::tagUnchecked() const {
   return bits & TagMask;
 }
@@ -1713,6 +1746,12 @@ inline size_t MarkStack::SlotsOrElementsRange::start() const {
 inline void MarkStack::SlotsOrElementsRange::setStart(size_t newStart) {
   startAndKind_ = (newStart << StartShift) | uintptr_t(kind());
   MOZ_ASSERT(start() == newStart);
+}
+
+inline void MarkStack::SlotsOrElementsRange::setEmpty() {
+  TaggedPtr entry = TaggedPtr(ObjectTag, ptr().asRangeObject());
+  ptr_ = entry;
+  startAndKind_ = entry.asBits();
 }
 
 inline MarkStack::TaggedPtr MarkStack::SlotsOrElementsRange::ptr() const {

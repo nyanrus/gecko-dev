@@ -81,6 +81,23 @@ class BrowserRobot {
         sessionLoadedIdlingResource = SessionLoadedIdlingResource()
 
         registerAndCleanupIdlingResources(sessionLoadedIdlingResource) {
+            // Check if toolbar is displayed
+            // Check if a prompt is being displayed
+            if (
+                !itemWithResId("$packageName:id/mozac_browser_toolbar_url_view").exists() &&
+                itemWithResId("$packageName:id/title").exists()
+            ) {
+                Log.i(TAG, "verifyUrl: The toolbar is not displayed")
+                Log.i(TAG, "verifyUrl: A prompt is being displayed")
+                Log.i(TAG, "verifyUrl: Trying to click device back button")
+                // Dismiss the prompt by clicking the device back button
+                mDevice.pressBack()
+                Log.i(TAG, "verifyUrl: Clicked device back button")
+                Log.i(TAG, "verifyUrl: Waiting for $waitingTimeShort ms for $packageName window to be updated")
+                mDevice.waitForWindowUpdate(packageName, waitingTimeShort)
+                Log.i(TAG, "verifyUrl: Waited for $waitingTimeShort ms for $packageName window to be updated")
+            }
+
             assertUIObjectExists(
                 itemWithResIdContainingText(
                     "$packageName:id/mozac_browser_toolbar_url_view",
@@ -1014,7 +1031,7 @@ class BrowserRobot {
             return NavigationToolbarRobot.Transition()
         }
 
-        fun openTabDrawer(interact: TabDrawerRobot.() -> Unit): TabDrawerRobot.Transition {
+        fun openTabDrawer(composeTestRule: HomeActivityComposeTestRule, interact: TabDrawerRobot.() -> Unit): TabDrawerRobot.Transition {
             for (i in 1..RETRY_COUNT) {
                 try {
                     Log.i(TAG, "openTabDrawer: Started try #$i")
@@ -1028,7 +1045,9 @@ class BrowserRobot {
                     Log.i(TAG, "openTabDrawer: Trying to click the tab counter button")
                     tabsCounter().click()
                     Log.i(TAG, "openTabDrawer: Clicked the tab counter button")
-                    assertUIObjectExists(itemWithResId("$packageName:id/new_tab_button"))
+                    Log.i(TAG, "openTabDrawer: Trying to verify the tabs tray exists")
+                    composeTestRule.onNodeWithTag(TabsTrayTestTag.tabsTray).assertExists()
+                    Log.i(TAG, "openTabDrawer: Verified the tabs tray exists")
 
                     break
                 } catch (e: AssertionError) {
@@ -1042,49 +1061,12 @@ class BrowserRobot {
                     }
                 }
             }
-
-            assertUIObjectExists(itemWithResId("$packageName:id/new_tab_button"))
-
-            TabDrawerRobot().interact()
-            return TabDrawerRobot.Transition()
-        }
-
-        fun openComposeTabDrawer(composeTestRule: HomeActivityComposeTestRule, interact: ComposeTabDrawerRobot.() -> Unit): ComposeTabDrawerRobot.Transition {
-            for (i in 1..RETRY_COUNT) {
-                try {
-                    Log.i(TAG, "openComposeTabDrawer: Started try #$i")
-                    mDevice.waitForObjects(
-                        mDevice.findObject(
-                            UiSelector()
-                                .resourceId("$packageName:id/mozac_browser_toolbar_browser_actions"),
-                        ),
-                        waitingTime,
-                    )
-                    Log.i(TAG, "openComposeTabDrawer: Trying to click the tab counter button")
-                    tabsCounter().click()
-                    Log.i(TAG, "openComposeTabDrawer: Clicked the tab counter button")
-                    Log.i(TAG, "openComposeTabDrawer: Trying to verify the tabs tray exists")
-                    composeTestRule.onNodeWithTag(TabsTrayTestTag.tabsTray).assertExists()
-                    Log.i(TAG, "openComposeTabDrawer: Verified the tabs tray exists")
-
-                    break
-                } catch (e: AssertionError) {
-                    Log.i(TAG, "openComposeTabDrawer: AssertionError caught, executing fallback methods")
-                    if (i == RETRY_COUNT) {
-                        throw e
-                    } else {
-                        Log.i(TAG, "openComposeTabDrawer: Waiting for device to be idle")
-                        mDevice.waitForIdle()
-                        Log.i(TAG, "openComposeTabDrawer: Waited for device to be idle")
-                    }
-                }
-            }
-            Log.i(TAG, "openComposeTabDrawer: Trying to verify the tabs tray new tab FAB button exists")
+            Log.i(TAG, "openTabDrawer: Trying to verify the tabs tray new tab FAB button exists")
             composeTestRule.onNodeWithTag(TabsTrayTestTag.fab).assertExists()
-            Log.i(TAG, "openComposeTabDrawer: Verified the tabs tray new tab FAB button exists")
+            Log.i(TAG, "openTabDrawer: Verified the tabs tray new tab FAB button exists")
 
-            ComposeTabDrawerRobot(composeTestRule).interact()
-            return ComposeTabDrawerRobot.Transition(composeTestRule)
+            TabDrawerRobot(composeTestRule).interact()
+            return TabDrawerRobot.Transition(composeTestRule)
         }
 
         fun openNotificationShade(interact: NotificationRobot.() -> Unit): NotificationRobot.Transition {

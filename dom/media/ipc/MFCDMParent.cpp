@@ -774,6 +774,12 @@ void MFCDMParent::GetCapabilities(const nsString& aKeySystem,
     return;
   }
 
+  // MFCDM requires persistent storage, and can't use in-memory storage, it
+  // can't be used in private browsing.
+  if (aFlags.contains(CapabilitesFlag::IsPrivateBrowsing)) {
+    return;
+  }
+
   ComPtr<IMFContentDecryptionModuleFactory> factory = aFactory;
   if (!factory) {
     RETURN_VOID_IF_FAILED(GetOrCreateFactory(aKeySystem, factory));
@@ -818,7 +824,9 @@ void MFCDMParent::GetCapabilities(const nsString& aKeySystem,
         if (aCodec.Equals(KeySystemConfig::EME_CODEC_HEVC)) {
           return "hev1"_ns;
         }
-        // TODO : support AV1?
+        if (aCodec.Equals(KeySystemConfig::EME_CODEC_AV1)) {
+          return "av01"_ns;
+        }
         if (aCodec.Equals(KeySystemConfig::EME_CODEC_AAC)) {
           return "mp4a"_ns;
         }
@@ -835,13 +843,10 @@ void MFCDMParent::GetCapabilities(const nsString& aKeySystem,
         return "none"_ns;
       };
 
-  // TODO : add AV1
-  static nsTArray<KeySystemConfig::EMECodecString> kVideoCodecs({
-      KeySystemConfig::EME_CODEC_H264,
-      KeySystemConfig::EME_CODEC_VP8,
-      KeySystemConfig::EME_CODEC_VP9,
-      KeySystemConfig::EME_CODEC_HEVC,
-  });
+  static nsTArray<KeySystemConfig::EMECodecString> kVideoCodecs(
+      {KeySystemConfig::EME_CODEC_H264, KeySystemConfig::EME_CODEC_VP8,
+       KeySystemConfig::EME_CODEC_VP9, KeySystemConfig::EME_CODEC_HEVC,
+       KeySystemConfig::EME_CODEC_AV1});
 
   // Remember supported video codecs.
   // It will be used when collecting audio codec and encryption scheme
@@ -921,9 +926,10 @@ void MFCDMParent::GetCapabilities(const nsString& aKeySystem,
   // For key system requires clearlead, every codec needs to have clear support.
   // If not, then we will remove the codec from supported codec.
   if (aFlags.contains(CapabilitesFlag::NeedClearLeadCheck)) {
-    for (const auto& scheme : aCapabilitiesOut.encryptionSchemes()) {
-      nsTArray<KeySystemConfig::EMECodecString> noClearLeadCodecs;
-      for (const auto& codec : supportedVideoCodecs) {
+    nsTArray<KeySystemConfig::EMECodecString> noClearLeadCodecs;
+    for (const auto& codec : supportedVideoCodecs) {
+      bool foundSupportedScheme = false;
+      for (const auto& scheme : aCapabilitiesOut.encryptionSchemes()) {
         nsAutoString additionalFeature(u"encryption-type=");
         // If we don't specify 'encryption-iv-size', it would use 8 bytes IV as
         // default [1]. If it's not supported, then we will try 16 bytes later.
@@ -945,7 +951,8 @@ void MFCDMParent::GetCapabilities(const nsString& aKeySystem,
                           CryptoSchemeToString(scheme), codec.get(),
                           rv ? "supported" : "not supported");
         if (rv) {
-          continue;
+          foundSupportedScheme = true;
+          break;
         }
         // Try 16 bytes IV.
         additionalFeature.AppendLiteral(u"encryption-iv-size=16,");
@@ -955,19 +962,24 @@ void MFCDMParent::GetCapabilities(const nsString& aKeySystem,
         MFCDM_PARENT_SLOG("clearlead %s IV 16 bytes %s %s",
                           CryptoSchemeToString(scheme), codec.get(),
                           rv ? "supported" : "not supported");
-        // Failed on both, so remove the codec from supported codec.
-        if (!rv) {
-          noClearLeadCodecs.AppendElement(codec);
+
+        if (rv) {
+          foundSupportedScheme = true;
+          break;
         }
       }
-      for (const auto& codec : noClearLeadCodecs) {
-        MFCDM_PARENT_SLOG("%s: -video:%s", __func__, codec.get());
-        aCapabilitiesOut.videoCapabilities().RemoveElementsBy(
-            [&codec](const MFCDMMediaCapability& aCapbilities) {
-              return aCapbilities.contentType() == NS_ConvertUTF8toUTF16(codec);
-            });
-        supportedVideoCodecs.RemoveElement(codec);
+      // Failed on all schemes, add the codec to the list and remove it later.
+      if (!foundSupportedScheme) {
+        noClearLeadCodecs.AppendElement(codec);
       }
+    }
+    for (const auto& codec : noClearLeadCodecs) {
+      MFCDM_PARENT_SLOG("%s: -video:%s", __func__, codec.get());
+      aCapabilitiesOut.videoCapabilities().RemoveElementsBy(
+          [&codec](const MFCDMMediaCapability& aCapbilities) {
+            return aCapbilities.contentType() == NS_ConvertUTF8toUTF16(codec);
+          });
+      supportedVideoCodecs.RemoveElement(codec);
     }
   }
 
@@ -1005,6 +1017,9 @@ mozilla::ipc::IPCResult MFCDMParent::RecvGetCapabilities(
   if (RequireClearLead(aRequest.keySystem())) {
     flags += CapabilitesFlag::NeedClearLeadCheck;
   }
+  if (aRequest.isPrivateBrowsing()) {
+    flags += CapabilitesFlag::IsPrivateBrowsing;
+  }
   GetCapabilities(aRequest.keySystem(), flags, mFactory.Get(), capabilities);
   aResolver(std::move(capabilities));
   return IPC_OK();
@@ -1032,8 +1047,10 @@ mozilla::ipc::IPCResult MFCDMParent::RecvInit(
       RequirementToStr(aParams.distinctiveID()),
       RequirementToStr(aParams.persistentState()),
       IsKeySystemHWSecure(mKeySystem, aParams.videoCapabilities()));
-  MOZ_ASSERT(IsTypeSupported(mFactory, mKeySystem));
 
+  MFCDM_REJECT_IF(!mFactory, NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+
+  MOZ_ASSERT(IsTypeSupported(mFactory, mKeySystem));
   MFCDM_REJECT_IF_FAILED(CreateContentDecryptionModule(
                              mFactory, MapKeySystem(mKeySystem), aParams, mCDM),
                          NS_ERROR_FAILURE);

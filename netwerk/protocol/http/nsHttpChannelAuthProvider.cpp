@@ -619,8 +619,16 @@ nsresult nsHttpChannelAuthProvider::GetCredentials(
     cc.AppendElement(ac);
   }
 
-  cc.StableSort([](const AuthChallenge& lhs, const AuthChallenge& rhs) {
-    if (StaticPrefs::network_auth_choose_most_secure_challenge()) {
+  // Returns true if an authorization is in progress
+  auto authInProgress = [&]() -> bool {
+    return proxyAuth ? mProxyAuthContinuationState : mAuthContinuationState;
+  };
+
+  // We shouldn't sort if authorization is already in progress
+  // otherwise we might end up picking the wrong one. See bug 1805666
+  if (!authInProgress() ||
+      StaticPrefs::network_auth_sort_challenge_in_progress()) {
+    cc.StableSort([](const AuthChallenge& lhs, const AuthChallenge& rhs) {
       // Different auth types
       if (lhs.rank != rhs.rank) {
         return lhs.rank < rhs.rank ? 1 : -1;
@@ -631,19 +639,15 @@ nsresult nsHttpChannelAuthProvider::GetCredentials(
       if (lhs.rank != ChallengeRank::Digest) {
         return 0;
       }
-    } else {
+
       // Non-digest challenges should not be reordered when the pref is off.
       if (lhs.algorithm == 0 || rhs.algorithm == 0) {
         return 0;
       }
-    }
 
-    // Same algorithm.
-    if (lhs.algorithm == rhs.algorithm) {
-      return 0;
-    }
-    return lhs.algorithm < rhs.algorithm ? 1 : -1;
-  });
+      return lhs.algorithm < rhs.algorithm ? 1 : -1;
+    });
+  }
 
   nsCOMPtr<nsIHttpAuthenticator> auth;
   nsCString authType;  // force heap allocation to enable string sharing since

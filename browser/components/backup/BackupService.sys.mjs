@@ -4,7 +4,9 @@
 
 import * as DefaultBackupResources from "resource:///modules/backup/BackupResources.sys.mjs";
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
+const SCHEDULED_BACKUPS_ENABLED_PREF_NAME = "browser.backup.scheduled.enabled";
 const lazy = {};
 
 ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
@@ -23,17 +25,35 @@ ChromeUtils.defineLazyGetter(lazy, "fxAccounts", () => {
 });
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  ClientID: "resource://gre/modules/ClientID.sys.mjs",
   JsonSchemaValidator:
     "resource://gre/modules/components-utils/JsonSchemaValidator.sys.mjs",
   UIState: "resource://services-sync/UIState.sys.mjs",
 });
+
+ChromeUtils.defineLazyGetter(lazy, "ZipWriter", () =>
+  Components.Constructor("@mozilla.org/zipwriter;1", "nsIZipWriter", "open")
+);
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "scheduledBackupsPref",
+  SCHEDULED_BACKUPS_ENABLED_PREF_NAME,
+  false,
+  function onUpdateScheduledBackups(_pref, _prevVal, newVal) {
+    let bs = BackupService.get();
+    if (bs) {
+      bs.onUpdateScheduledBackups(newVal);
+    }
+  }
+);
 
 /**
  * The BackupService class orchestrates the scheduling and creation of profile
  * backups. It also does most of the heavy lifting for the restoration of a
  * profile backup.
  */
-export class BackupService {
+export class BackupService extends EventTarget {
   /**
    * The BackupService singleton instance.
    *
@@ -50,11 +70,67 @@ export class BackupService {
   #resources = new Map();
 
   /**
+   * Set to true if a backup is currently in progress. Causes stateUpdate()
+   * to be called.
+   *
+   * @see BackupService.stateUpdate()
+   * @param {boolean} val
+   *   True if a backup is in progress.
+   */
+  set #backupInProgress(val) {
+    if (this.#_state.backupInProgress != val) {
+      this.#_state.backupInProgress = val;
+      this.stateUpdate();
+    }
+  }
+
+  /**
    * True if a backup is currently in progress.
    *
    * @type {boolean}
    */
-  #backupInProgress = false;
+  get #backupInProgress() {
+    return this.#_state.backupInProgress;
+  }
+
+  /**
+   * Dispatches an event to let listeners know that the BackupService state
+   * object has been updated.
+   */
+  stateUpdate() {
+    this.dispatchEvent(new CustomEvent("BackupService:StateUpdate"));
+  }
+
+  /**
+   * An object holding the current state of the BackupService instance, for
+   * the purposes of representing it in the user interface. Ideally, this would
+   * be named #state instead of #_state, but sphinx-js seems to be fairly
+   * unhappy with that coupled with the ``state`` getter.
+   *
+   * @type {object}
+   */
+  #_state = {
+    backupFilePath: "Documents", // TODO: make save location configurable (bug 1895943)
+    backupInProgress: false,
+    scheduledBackupsEnabled: lazy.scheduledBackupsPref,
+  };
+
+  /**
+   * A Promise that will resolve once the postRecovery steps are done. It will
+   * also resolve if postRecovery steps didn't need to run.
+   *
+   * @see BackupService.checkForPostRecovery()
+   * @type {Promise<undefined>}
+   */
+  #postRecoveryPromise;
+
+  /**
+   * The resolving function for #postRecoveryPromise, which should be called
+   * by checkForPostRecovery() before exiting.
+   *
+   * @type {Function}
+   */
+  #postRecoveryResolver;
 
   /**
    * The name of the backup manifest file.
@@ -132,6 +208,15 @@ export class BackupService {
   }
 
   /**
+   * The level of Zip compression to use on the zipped staging folder.
+   *
+   * @type {number}
+   */
+  static get COMPRESSION_LEVEL() {
+    return Ci.nsIZipWriter.COMPRESSION_BEST;
+  }
+
+  /**
    * Returns a reference to a BackupService singleton. If this is the first time
    * that this getter is accessed, this causes the BackupService singleton to be
    * be instantiated.
@@ -172,12 +257,40 @@ export class BackupService {
    * @param {object} [backupResources=DefaultBackupResources] - Object containing BackupResource classes to associate with this service.
    */
   constructor(backupResources = DefaultBackupResources) {
+    super();
     lazy.logConsole.debug("Instantiated");
 
     for (const resourceName in backupResources) {
       let resource = backupResources[resourceName];
       this.#resources.set(resource.key, resource);
     }
+
+    let { promise, resolve } = Promise.withResolvers();
+    this.#postRecoveryPromise = promise;
+    this.#postRecoveryResolver = resolve;
+  }
+
+  /**
+   * Returns a reference to a Promise that will resolve with undefined once
+   * postRecovery steps have had a chance to run. This will also be resolved
+   * with undefined if no postRecovery steps needed to be run.
+   *
+   * @see BackupService.checkForPostRecovery()
+   * @returns {Promise<undefined>}
+   */
+  get postRecoveryComplete() {
+    return this.#postRecoveryPromise;
+  }
+
+  /**
+   * Returns a state object describing the state of the BackupService for the
+   * purposes of representing it in the user interface. The returned state
+   * object is immutable.
+   *
+   * @type {object}
+   */
+  get state() {
+    return Object.freeze(structuredClone(this.#_state));
   }
 
   /**
@@ -209,7 +322,7 @@ export class BackupService {
 
     try {
       lazy.logConsole.debug(`Creating backup for profile at ${profilePath}`);
-      let manifest = this.#createBackupManifest();
+      let manifest = await this.#createBackupManifest();
 
       // First, check to see if a `backups` directory already exists in the
       // profile.
@@ -301,7 +414,13 @@ export class BackupService {
         "Wrote backup to staging directory at ",
         renamedStagingPath
       );
-      return { stagingPath: renamedStagingPath };
+
+      let compressedStagingPath = await this.#compressStagingFolder(
+        renamedStagingPath,
+        backupDirPath
+      );
+
+      return { stagingPath: renamedStagingPath, compressedStagingPath };
     } finally {
       this.#backupInProgress = false;
     }
@@ -328,6 +447,90 @@ export class BackupService {
     await IOUtils.makeDirectory(stagingPath);
 
     return stagingPath;
+  }
+
+  /**
+   * Compresses a staging folder into a Zip file. If a pre-existing Zip file
+   * for a staging folder resides in destFolderPath, it is overwritten. The
+   * Zip file will have the same name as the stagingPath folder, with `.zip`
+   * as the extension.
+   *
+   * @param {string} stagingPath
+   *   The path to the staging folder to be compressed.
+   * @param {string} destFolderPath
+   *   The parent folder to write the Zip file to.
+   * @returns {Promise<string>}
+   *   Resolves with the path to the created Zip file.
+   */
+  async #compressStagingFolder(stagingPath, destFolderPath) {
+    const PR_RDWR = 0x04;
+    const PR_CREATE_FILE = 0x08;
+    const PR_TRUNCATE = 0x20;
+
+    let archivePath = PathUtils.join(
+      destFolderPath,
+      `${PathUtils.filename(stagingPath)}.zip`
+    );
+    let archiveFile = await IOUtils.getFile(archivePath);
+
+    let writer = new lazy.ZipWriter(
+      archiveFile,
+      PR_RDWR | PR_CREATE_FILE | PR_TRUNCATE
+    );
+
+    lazy.logConsole.log("Compressing staging folder to ", archivePath);
+    let rootPathNSIFile = await IOUtils.getDirectory(stagingPath);
+    await this.#compressChildren(rootPathNSIFile, stagingPath, writer);
+    await new Promise(resolve => {
+      let observer = {
+        onStartRequest(_request) {
+          lazy.logConsole.debug("Starting to write out archive file");
+        },
+        onStopRequest(_request, status) {
+          lazy.logConsole.log("Done writing archive file");
+          resolve(status);
+        },
+      };
+      writer.processQueue(observer, null);
+    });
+    writer.close();
+
+    return archivePath;
+  }
+
+  /**
+   * A helper function for #compressStagingFolder that iterates through a
+   * directory, and adds each file to a nsIZipWriter. For each directory it
+   * finds, it recurses.
+   *
+   * @param {nsIFile} rootPathNSIFile
+   *   An nsIFile pointing at the root of the folder being compressed.
+   * @param {string} parentPath
+   *   The path to the folder whose children should be iterated.
+   * @param {nsIZipWriter} writer
+   *   The writer to add all of the children to.
+   * @returns {Promise<undefined>}
+   */
+  async #compressChildren(rootPathNSIFile, parentPath, writer) {
+    let children = await IOUtils.getChildren(parentPath);
+    for (let childPath of children) {
+      let childState = await IOUtils.stat(childPath);
+      if (childState.type == "directory") {
+        await this.#compressChildren(rootPathNSIFile, childPath, writer);
+      } else {
+        let childFile = await IOUtils.getFile(childPath);
+        // nsIFile.getRelativePath returns paths using the "/" separator,
+        // regardless of which platform we're on. That's handy, because this
+        // is the same separator that nsIZipWriter expects for entries.
+        let pathRelativeToRoot = childFile.getRelativePath(rootPathNSIFile);
+        writer.addEntryFile(
+          pathRelativeToRoot,
+          BackupService.COMPRESSION_LEVEL,
+          childFile,
+          true
+        );
+      }
+    }
   }
 
   /**
@@ -387,12 +590,12 @@ export class BackupService {
   }
 
   /**
-   * Creates and returns a backup manifest object with an empty resources
+   * Creates and resolves with a backup manifest object with an empty resources
    * property.
    *
-   * @returns {object}
+   * @returns {Promise<object>}
    */
-  #createBackupManifest() {
+  async #createBackupManifest() {
     let profileSvc = Cc["@mozilla.org/toolkit/profile-service;1"].getService(
       Ci.nsIToolkitProfileService
     );
@@ -406,30 +609,27 @@ export class BackupService {
       profileName = profileSvc.currentProfile.name;
     }
 
-    // Default these to undefined rather than null so that they're not included
-    // the meta object if we're not signed in.
-    let accountID = undefined;
-    let accountEmail = undefined;
+    let meta = {
+      date: new Date().toISOString(),
+      appName: AppConstants.MOZ_APP_NAME,
+      appVersion: AppConstants.MOZ_APP_VERSION,
+      buildID: AppConstants.MOZ_BUILDID,
+      profileName,
+      machineName: lazy.fxAccounts.device.getLocalName(),
+      osName: Services.sysinfo.getProperty("name"),
+      osVersion: Services.sysinfo.getProperty("version"),
+      legacyClientID: await lazy.ClientID.getClientID(),
+    };
+
     let fxaState = lazy.UIState.get();
     if (fxaState.status == lazy.UIState.STATUS_SIGNED_IN) {
-      accountID = fxaState.uid;
-      accountEmail = fxaState.email;
+      meta.accountID = fxaState.uid;
+      meta.accountEmail = fxaState.email;
     }
 
     return {
       version: BackupService.MANIFEST_SCHEMA_VERSION,
-      meta: {
-        date: new Date().toISOString(),
-        appName: AppConstants.MOZ_APP_NAME,
-        appVersion: AppConstants.MOZ_APP_VERSION,
-        buildID: AppConstants.MOZ_BUILDID,
-        profileName,
-        machineName: lazy.fxAccounts.device.getLocalName(),
-        osName: Services.sysinfo.getProperty("name"),
-        osVersion: Services.sysinfo.getProperty("version"),
-        accountID,
-        accountEmail,
-      },
+      meta,
       resources: {},
     };
   }
@@ -559,6 +759,33 @@ export class BackupService {
         }
       }
 
+      // Make sure that a legacy telemetry client ID exists and is written to
+      // disk.
+      let clientID = await lazy.ClientID.getClientID();
+      lazy.logConsole.debug("Current client ID: ", clientID);
+      // Next, copy over the legacy telemetry client ID state from the currently
+      // running profile. The newly created profile that we're recovering into
+      // should inherit this client ID.
+      const TELEMETRY_STATE_FILENAME = "state.json";
+      const TELEMETRY_STATE_FOLDER = "datareporting";
+      await IOUtils.makeDirectory(
+        PathUtils.join(profile.rootDir.path, TELEMETRY_STATE_FOLDER)
+      );
+      await IOUtils.copy(
+        /* source */
+        PathUtils.join(
+          PathUtils.profileDir,
+          TELEMETRY_STATE_FOLDER,
+          TELEMETRY_STATE_FILENAME
+        ),
+        /* destination */
+        PathUtils.join(
+          profile.rootDir.path,
+          TELEMETRY_STATE_FOLDER,
+          TELEMETRY_STATE_FILENAME
+        )
+      );
+
       let postRecoveryPath = PathUtils.join(
         profile.rootDir.path,
         BackupService.POST_RECOVERY_FILE_NAME
@@ -608,6 +835,7 @@ export class BackupService {
 
     if (!(await IOUtils.exists(postRecoveryFile))) {
       lazy.logConsole.debug("Did not find post-recovery file.");
+      this.#postRecoveryResolver();
       return;
     }
 
@@ -631,6 +859,36 @@ export class BackupService {
       }
     } finally {
       await IOUtils.remove(postRecoveryFile, { ignoreAbsent: true });
+      this.#postRecoveryResolver();
+    }
+  }
+
+  /**
+   * Sets browser.backup.scheduled.enabled to true or false.
+   *
+   * @param { boolean } shouldEnableScheduledBackups true if scheduled backups should be enabled. Else, false.
+   */
+  setScheduledBackups(shouldEnableScheduledBackups) {
+    Services.prefs.setBoolPref(
+      SCHEDULED_BACKUPS_ENABLED_PREF_NAME,
+      shouldEnableScheduledBackups
+    );
+  }
+
+  /**
+   * Updates scheduledBackupsEnabled in the backup service state. Should be called every time
+   * the value for browser.backup.scheduled.enabled changes.
+   *
+   * @param {boolean} isScheduledBackupsEnabled True if scheduled backups are enabled. Else false.
+   */
+  onUpdateScheduledBackups(isScheduledBackupsEnabled) {
+    if (this.#_state.scheduledBackupsEnabled != isScheduledBackupsEnabled) {
+      lazy.logConsole.debug(
+        "Updating scheduled backups",
+        isScheduledBackupsEnabled
+      );
+      this.#_state.scheduledBackupsEnabled = isScheduledBackupsEnabled;
+      this.stateUpdate();
     }
   }
 

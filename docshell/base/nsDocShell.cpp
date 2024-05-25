@@ -64,6 +64,7 @@
 #include "mozilla/dom/ContentFrameMessageManager.h"
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/FragmentDirective.h"
 #include "mozilla/dom/HTMLAnchorElement.h"
 #include "mozilla/dom/HTMLIFrameElement.h"
 #include "mozilla/dom/PerformanceNavigation.h"
@@ -167,7 +168,6 @@
 #include "nsIURILoader.h"
 #include "nsIViewSourceChannel.h"
 #include "nsIWebBrowserChrome.h"
-#include "nsIWebBrowserChromeFocus.h"
 #include "nsIWebBrowserFind.h"
 #include "nsIWebProgress.h"
 #include "nsIWidget.h"
@@ -2095,27 +2095,6 @@ nsDocShell::GetBusyFlags(BusyFlags* aBusyFlags) {
   NS_ENSURE_ARG_POINTER(aBusyFlags);
 
   *aBusyFlags = mBusyFlags;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDocShell::TabToTreeOwner(bool aForward, bool aForDocumentNavigation,
-                           bool* aTookFocus) {
-  NS_ENSURE_ARG_POINTER(aTookFocus);
-
-  nsCOMPtr<nsIWebBrowserChromeFocus> chromeFocus = do_GetInterface(mTreeOwner);
-  if (chromeFocus) {
-    if (aForward) {
-      *aTookFocus =
-          NS_SUCCEEDED(chromeFocus->FocusNextElement(aForDocumentNavigation));
-    } else {
-      *aTookFocus =
-          NS_SUCCEEDED(chromeFocus->FocusPrevElement(aForDocumentNavigation));
-    }
-  } else {
-    *aTookFocus = false;
-  }
-
   return NS_OK;
 }
 
@@ -6172,7 +6151,6 @@ nsresult nsDocShell::FilterStatusForErrorPage(
     // to see the error page.
     nsCOMPtr<nsILoadInfo> info = aChannel->LoadInfo();
     if (!info->TriggeringPrincipal()->IsSystemPrincipal() &&
-        StaticPrefs::dom_no_unknown_protocol_error_enabled() &&
         !aIsInitialDocument) {
       if (aSkippedUnknownProtocolNavigation) {
         *aSkippedUnknownProtocolNavigation = true;
@@ -8498,6 +8476,17 @@ bool nsDocShell::IsSameDocumentNavigation(nsDocShellLoadState* aLoadState,
     rvURINew = aLoadState->URI()->GetHasRef(&aState.mNewURIHasRef);
   }
 
+  // A Fragment Directive must be removed from the new hash in order to allow
+  // fallback element id scroll. Additionally, the extracted parsed text
+  // directives need to be stored for further use.
+  nsTArray<TextDirective> textDirectives;
+  if (FragmentDirective::ParseAndRemoveFragmentDirectiveFromFragmentString(
+          aState.mNewHash, &textDirectives)) {
+    if (Document* doc = GetDocument()) {
+      doc->FragmentDirective()->SetTextDirectives(std::move(textDirectives));
+    }
+  }
+
   if (currentURI && NS_SUCCEEDED(rvURINew)) {
     nsresult rvURIOld = currentURI->GetRef(aState.mCurrentHash);
     if (NS_SUCCEEDED(rvURIOld)) {
@@ -9847,6 +9836,9 @@ nsIPrincipal* nsDocShell::GetInheritedPrincipal(
       nsCOMPtr<nsIClassOfService> cos(do_QueryInterface(channel));
       if (cos) {
         cos->AddClassFlags(nsIClassOfService::UrgentStart);
+        if (StaticPrefs::dom_document_priority_incremental()) {
+          cos->SetIncremental(true);
+        }
       }
     }
   }
@@ -10720,6 +10712,24 @@ nsresult nsDocShell::ScrollToAnchor(bool aCurHasRef, bool aNewHasRef,
     rootScroll->ClearDidHistoryRestore();
   }
 
+  // If it's a load from history, we don't have any anchor jumping to do.
+  // Scrollbar position will be restored by the caller based on positions stored
+  // in session history.
+  bool scroll = aLoadType != LOAD_HISTORY && aLoadType != LOAD_RELOAD_NORMAL;
+  // If the load contains text directives, try to apply them. This may fail if
+  // the load is a same-document load that was initiated before the document was
+  // fully loaded and the target is not yet included in the DOM tree.
+  // For this case, the `uninvokedTextDirectives` are not cleared, so that
+  // `Document::ScrollToRef()` can re-apply the text directive.
+  // `Document::ScrollToRef()` is (presumably) the second "async" call mentioned
+  // in sec. 7.4.2.3.3 in the HTML spec, "Fragment navigations":
+  // https://html.spec.whatwg.org/#scroll-to-fragid:~:text=This%20algorithm%20will%20be%20called%20twice
+  const bool hasScrolledToTextFragment =
+      presShell->HighlightAndGoToTextFragment(scroll);
+  if (hasScrolledToTextFragment) {
+    return NS_OK;
+  }
+
   // If we have no new anchor, we do not want to scroll, unless there is a
   // current anchor and we are doing a history load.  So return if we have no
   // new anchor, and there is no current anchor or the load is not a history
@@ -10730,11 +10740,6 @@ nsresult nsDocShell::ScrollToAnchor(bool aCurHasRef, bool aNewHasRef,
 
   // Both the new and current URIs refer to the same page. We can now
   // browse to the hash stored in the new URI.
-
-  // If it's a load from history, we don't have any anchor jumping to do.
-  // Scrollbar position will be restored by the caller based on positions stored
-  // in session history.
-  bool scroll = aLoadType != LOAD_HISTORY && aLoadType != LOAD_RELOAD_NORMAL;
 
   if (aNewHash.IsEmpty()) {
     // 2. If fragment is the empty string, then return the special value top of

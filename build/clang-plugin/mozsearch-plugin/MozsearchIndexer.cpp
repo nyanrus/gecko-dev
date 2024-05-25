@@ -122,6 +122,21 @@ static bool isValidIdentifier(std::string Input) {
   return true;
 }
 
+template <size_t N>
+static bool stringStartsWith(const std::string& Input,
+                             const char (&Prefix)[N]) {
+  return Input.length() > N - 1 && memcmp(Input.c_str(), Prefix, N - 1) == 0;
+}
+
+static bool isASCII(const std::string& Input) {
+  for (char C : Input) {
+    if (C & 0x80) {
+      return false;
+    }
+  }
+  return true;
+}
+
 struct RAIITracer {
   RAIITracer(const char *log) : mLog(log) {
     printf("<%s>\n", mLog);
@@ -137,6 +152,14 @@ struct RAIITracer {
 #define TRACEFUNC RAIITracer tracer(__FUNCTION__);
 
 class IndexConsumer;
+
+bool isPure(FunctionDecl* D) {
+#if CLANG_VERSION_MAJOR >= 18
+  return D->isPureVirtual();
+#else
+  return D->isPure();
+#endif
+}
 
 // For each C++ file seen by the analysis (.cpp or .h), we track a
 // FileInfo. This object tracks whether the file is "interesting" (i.e., whether
@@ -191,7 +214,12 @@ public:
 #endif
                                   StringRef SearchPath,
                                   StringRef RelativePath,
+#if CLANG_VERSION_MAJOR >= 19
+                                  const Module *SuggestedModule,
+                                  bool ModuleImported,
+#else
                                   const Module *Imported,
+#endif
                                   SrcMgr::CharacteristicKind FileType) override;
 
   virtual void MacroDefined(const Token &Tok,
@@ -471,6 +499,10 @@ private:
       Filename = std::string(Platform ? Platform : "") + std::string("@") + Filename;
     }
     return Filename;
+  }
+
+  std::string mangleURL(std::string Url) {
+    return mangleFile(Url, FileType::Source);
   }
 
   std::string mangleQualifiedName(std::string Name) {
@@ -1749,7 +1781,7 @@ public:
         D = D2->getTemplateInstantiationPattern();
       }
       // We treat pure virtual declarations as definitions.
-      Kind = (D2->isThisDeclarationADefinition() || D2->isPure()) ? "def" : "decl";
+      Kind = (D2->isThisDeclarationADefinition() || isPure(D2)) ? "def" : "decl";
       PrettyKind = "function";
       PeekRange = getFunctionPeekRange(D2);
 
@@ -1881,7 +1913,7 @@ public:
       }
     }
     if (FunctionDecl *D2 = dyn_cast<FunctionDecl>(D)) {
-      if ((D2->isThisDeclarationADefinition() || D2->isPure()) &&
+      if ((D2->isThisDeclarationADefinition() || isPure(D2)) &&
           // a clause at the top should have generalized and set wasTemplate so
           // it shouldn't be the case that isTemplateInstantiation() is true.
           !D2->isTemplateInstantiation() &&
@@ -2231,6 +2263,35 @@ public:
     return true;
   }
 
+  bool VisitStringLiteral(StringLiteral *E) {
+    if (E->getCharByteWidth() != 1) {
+      return true;
+    }
+
+    StringRef sref = E->getString();
+    std::string s = sref.str();
+
+    if (!stringStartsWith(s, "chrome://") &&
+        !stringStartsWith(s, "resource://")) {
+      return true;
+    }
+
+    if (!isASCII(s)) {
+      return true;
+    }
+
+    SourceLocation Loc = E->getStrTokenLoc(0);
+    normalizeLocation(&Loc);
+
+    std::string symbol = std::string("URL_") + mangleURL(s);
+
+    visitIdentifier("use", "file", StringRef(s), Loc, symbol,
+                    QualType(), Context(),
+                    NotIdentifierToken | LocRangeEndValid);
+
+    return true;
+  }
+
   void enterSourceFile(SourceLocation Loc) {
     normalizeLocation(&Loc);
     FileInfo* newFile = getFileInfo(Loc);
@@ -2335,7 +2396,12 @@ void PreprocessorHook::InclusionDirective(SourceLocation HashLoc,
 #endif
                                           StringRef SearchPath,
                                           StringRef RelativePath,
+#if CLANG_VERSION_MAJOR >= 19
+                                          const Module *SuggestedModule,
+                                          bool ModuleImported,
+#else
                                           const Module *Imported,
+#endif
                                           SrcMgr::CharacteristicKind FileType) {
 #if CLANG_VERSION_MAJOR >= 15
   if (!File) {

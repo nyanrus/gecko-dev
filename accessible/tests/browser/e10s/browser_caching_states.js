@@ -425,6 +425,11 @@ addAccessibleTask(
 <div role="listbox" aria-multiselectable="true">
   <div id="multiNoSel" role="option" tabindex="0">multiNoSel</div>
 </div>
+<div role="grid">
+  <div role="row">
+    <div id="gridcell" role="gridcell" tabindex="0">gridcell</div>
+  </div>
+</div>
   `,
   async function (browser, docAcc) {
     const noSel = findAccessibleChildByID(docAcc, "noSel");
@@ -450,6 +455,14 @@ addAccessibleTask(
     multiNoSel.takeFocus();
     await focused;
     testStates(multiNoSel, STATE_FOCUSED, 0, STATE_SELECTED, 0);
+
+    const gridcell = findAccessibleChildByID(docAcc, "gridcell");
+    testStates(gridcell, 0, 0, STATE_FOCUSED | STATE_SELECTED, 0);
+    info("Focusing gridcell");
+    focused = waitForEvent(EVENT_FOCUS, gridcell);
+    gridcell.takeFocus();
+    await focused;
+    testStates(gridcell, STATE_FOCUSED, 0, STATE_SELECTED, 0);
   },
   { topLevel: true, iframe: true, remoteIframe: true, chrome: true }
 );
@@ -704,4 +717,28 @@ addAccessibleTask(
     testStates(checkbox, 0, 0, STATE_MIXED);
   },
   { chrome: true, topLevel: true, iframe: true, remoteIframe: true }
+);
+
+/**
+ * Test the readonly state on progress bars.
+ */
+addAccessibleTask(
+  `
+<progress id="htmlProgress"></progress>
+<div id="ariaProgress" role="progressbar">ariaProgress</div>
+<div id="ariaProgressRoFalse" role="progressbar" aria-readonly="false">ariaProgressRoFalse</div>
+  `,
+  async function testProgressBarReadOnly(browser, docAcc) {
+    const htmlProgress = findAccessibleChildByID(docAcc, "htmlProgress");
+    testStates(htmlProgress, STATE_READONLY);
+    const ariaProgress = findAccessibleChildByID(docAcc, "ariaProgress");
+    testStates(ariaProgress, STATE_READONLY);
+    // aria-readonly isn't valid and has no effect on a progress bar.
+    const ariaProgressRoFalse = findAccessibleChildByID(
+      docAcc,
+      "ariaProgressRoFalse"
+    );
+    testStates(ariaProgressRoFalse, STATE_READONLY);
+  },
+  { chrome: true, topLevel: true }
 );

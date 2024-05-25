@@ -1010,18 +1010,19 @@ def target_tasks_daily_releases(full_task_graph, parameters, graph_config):
 def target_tasks_nightly_desktop(full_task_graph, parameters, graph_config):
     """Select the set of tasks required for a nightly build of linux, mac,
     windows."""
-    index_path = (
-        f"{graph_config['trust-domain']}.v2.{parameters['project']}.revision."
-        f"{parameters['head_rev']}.taskgraph.decision-nightly-desktop"
-    )
-    if os.environ.get("MOZ_AUTOMATION") and retry(
-        index_exists,
-        args=(index_path,),
-        kwargs={
-            "reason": "to avoid triggering multiple nightlies off the same revision",
-        },
-    ):
-        return []
+    for platform in ("desktop", "all"):
+        index_path = (
+            f"{graph_config['trust-domain']}.v2.{parameters['project']}.revision."
+            f"{parameters['head_rev']}.taskgraph.decision-nightly-{platform}"
+        )
+        if os.environ.get("MOZ_AUTOMATION") and retry(
+            index_exists,
+            args=(index_path,),
+            kwargs={
+                "reason": "to avoid triggering multiple nightlies off the same revision",
+            },
+        ):
+            return []
 
     # Tasks that aren't platform specific
     release_filter = make_desktop_nightly_filter({None})
@@ -1073,6 +1074,7 @@ def target_tasks_searchfox(full_task_graph, parameters, graph_config):
     return [
         "searchfox-linux64-searchfox/debug",
         "searchfox-macosx64-searchfox/debug",
+        "searchfox-macosx64-aarch64-searchfox/debug",
         "searchfox-win64-searchfox/debug",
         "searchfox-android-armv7-searchfox/debug",
         "searchfox-ios-searchfox/debug",
@@ -1631,18 +1633,19 @@ def target_tasks_nightly_android(full_task_graph, parameters, graph_config):
             "focus-nightly-firebase",
         )
 
-    index_path = (
-        f"{graph_config['trust-domain']}.v2.{parameters['project']}.branch."
-        f"{parameters['head_ref']}.revision.{parameters['head_rev']}.taskgraph.decision-nightly-android"
-    )
-    if os.environ.get("MOZ_AUTOMATION") and retry(
-        index_exists,
-        args=(index_path,),
-        kwargs={
-            "reason": "to avoid triggering multiple nightlies off the same revision",
-        },
-    ):
-        return []
+    for platform in ("android", "all"):
+        index_path = (
+            f"{graph_config['trust-domain']}.v2.{parameters['project']}.revision."
+            f"{parameters['head_rev']}.taskgraph.decision-nightly-{platform}"
+        )
+        if os.environ.get("MOZ_AUTOMATION") and retry(
+            index_exists,
+            args=(index_path,),
+            kwargs={
+                "reason": "to avoid triggering multiple nightlies off the same revision",
+            },
+        ):
+            return []
 
     return [l for l, t in full_task_graph.tasks.items() if filter(t, parameters)]
 

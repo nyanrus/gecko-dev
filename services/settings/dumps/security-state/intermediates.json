@@ -1,6 +1,258 @@
 {
   "data": [
     {
+      "schema": 1714791237384,
+      "derHash": "5b/O2dIW66faNjSBn7U0+5zroez55jee2DWD0usXfBs=",
+      "subject": "CN=CrowdStrike TLS RSA CA G5,O=CrowdStrike\\, Inc.,C=US",
+      "subjectDN": "ME0xCzAJBgNVBAYTAlVTMRowGAYDVQQKExFDcm93ZFN0cmlrZSwgSW5jLjEiMCAGA1UEAxMZQ3Jvd2RTdHJpa2UgVExTIFJTQSBDQSBHNQ==",
+      "whitelist": false,
+      "attachment": {
+        "hash": "6b261b8fac36823a39b743b18ca457b49c1f4893a008a41240cb63de234b3eba",
+        "size": 2320,
+        "filename": "0toMaTXv4oQGhqLQb3wV6ngpwpcoCQfzynj32yb61O0=.pem",
+        "location": "security-state-staging/intermediates/205794c2-2f9b-4b57-b0b0-170704b16ee2.pem",
+        "mimetype": "application/x-pem-file"
+      },
+      "pubKeyHash": "0toMaTXv4oQGhqLQb3wV6ngpwpcoCQfzynj32yb61O0=",
+      "crlite_enrolled": false,
+      "id": "42278641-4abb-4aa5-9eae-d168aad1bd07",
+      "last_modified": 1714791423308
+    },
+    {
+      "schema": 1714704845694,
+      "derHash": "dOYv6feKkbpnDR7sX0ZK3E7se36jJCedcm/9u2mfqfE=",
+      "subject": "CN=TLC ECC EV SSL CA,O=泰尔认证中心有限公司,C=CN",
+      "subjectDN": "MFIxCzAJBgNVBAYTAkNOMScwJQYDVQQKDB7ms7DlsJTorqTor4HkuK3lv4PmnInpmZDlhazlj7gxGjAYBgNVBAMTEVRMQyBFQ0MgRVYgU1NMIENB",
+      "whitelist": false,
+      "attachment": {
+        "hash": "94fbdc7b47eb9f327f5d26de1fe64a91e1302a6abeddb69f12c50ca42c9d4b7b",
+        "size": 1199,
+        "filename": "4AZvGJkPu2IGbtV23Ddjg3gchfybLCPCDeCuH9KOhOA=.pem",
+        "location": "security-state-staging/intermediates/49ea4ff8-4c17-4d5a-9340-96808df993e6.pem",
+        "mimetype": "application/x-pem-file"
+      },
+      "pubKeyHash": "4AZvGJkPu2IGbtV23Ddjg3gchfybLCPCDeCuH9KOhOA=",
+      "crlite_enrolled": false,
+      "id": "88a774a2-f773-415e-9f90-5998d2875d99",
+      "last_modified": 1714705023283
+    },
+    {
+      "schema": 1714704845298,
+      "derHash": "wmJ1jffOSO3muntY3zkYn+WcdhKHhUEDTVOtVRB3BoA=",
+      "subject": "CN=TLC RSA EV SSL CA,O=泰尔认证中心有限公司,C=CN",
+      "subjectDN": "MFIxCzAJBgNVBAYTAkNOMScwJQYDVQQKDB7ms7DlsJTorqTor4HkuK3lv4PmnInpmZDlhazlj7gxGjAYBgNVBAMTEVRMQyBSU0EgRVYgU1NMIENB",
+      "whitelist": false,
+      "attachment": {
+        "hash": "3c508f0bd22883f8ba5007906e10f91b266c8ab44a7610ae267bbf78a9f6db5a",
+        "size": 2211,
+        "filename": "xzR8bkQ4UNd0_ANMrSjojF2wOKZqm6Tcl3BiWae2a8U=.pem",
+        "location": "security-state-staging/intermediates/18acdf66-8842-4905-a40d-503d147cdf40.pem",
+        "mimetype": "application/x-pem-file"
+      },
+      "pubKeyHash": "xzR8bkQ4UNd0/ANMrSjojF2wOKZqm6Tcl3BiWae2a8U=",
+      "crlite_enrolled": false,
+      "id": "96248ea3-8697-4c3f-9bca-6f45f9cc916d",
+      "last_modified": 1714705023281
+    },
+    {
+      "schema": 1714704844877,
+      "derHash": "y5+K8ykM32GdzIFIRg7GgjjoBrwP2lQiybtyH1ikn2A=",
+      "subject": "CN=TLC ECC DV SSL CA,O=泰尔认证中心有限公司,C=CN",
+      "subjectDN": "MFIxCzAJBgNVBAYTAkNOMScwJQYDVQQKDB7ms7DlsJTorqTor4HkuK3lv4PmnInpmZDlhazlj7gxGjAYBgNVBAMTEVRMQyBFQ0MgRFYgU1NMIENB",
+      "whitelist": false,
+      "attachment": {
+        "hash": "261bb7c89d70587315d0b2f180e211f0a078db822fa9f28b596d304c61831521",
+        "size": 1199,
+        "filename": "znavVbQeyZVgAMRBfl_At7oscqmMOrTOPHCIBWmuLTI=.pem",
+        "location": "security-state-staging/intermediates/bbc5f08a-5c8b-49b4-9535-65481d806c01.pem",
+        "mimetype": "application/x-pem-file"
+      },
+      "pubKeyHash": "znavVbQeyZVgAMRBfl/At7oscqmMOrTOPHCIBWmuLTI=",
+      "crlite_enrolled": false,
+      "id": "65f3efaa-ccc0-4ac9-ac21-d07137585612",
+      "last_modified": 1714705023278
+    },
+    {
+      "schema": 1714704844483,
+      "derHash": "2KqlL45a43CHlprtHk8K+Mz2eJQQkPW2aQdqv2FghZs=",
+      "subject": "CN=TLC ECC OV SSL CA,O=泰尔认证中心有限公司,C=CN",
+      "subjectDN": "MFIxCzAJBgNVBAYTAkNOMScwJQYDVQQKDB7ms7DlsJTorqTor4HkuK3lv4PmnInpmZDlhazlj7gxGjAYBgNVBAMTEVRMQyBFQ0MgT1YgU1NMIENB",
+      "whitelist": false,
+      "attachment": {
+        "hash": "9632999c2f6121aeca53467eeeb24543c9423c503c8051b335aa137c0975c78e",
+        "size": 1203,
+        "filename": "1mntplQ3IQAKEEMMiw1XWdsvePYy6J9KrPlhDcP4kuk=.pem",
+        "location": "security-state-staging/intermediates/f775d056-a313-4fec-8983-11b4ef09ae98.pem",
+        "mimetype": "application/x-pem-file"
+      },
+      "pubKeyHash": "1mntplQ3IQAKEEMMiw1XWdsvePYy6J9KrPlhDcP4kuk=",
+      "crlite_enrolled": false,
+      "id": "9a557ba0-089c-4230-b267-caa82b6835eb",
+      "last_modified": 1714705023276
+    },
+    {
+      "schema": 1714704844057,
+      "derHash": "xuVtaMuHDaku43ueaxgg2uFxA7GOgNldEOnrteBsrPU=",
+      "subject": "CN=TLC RSA DV SSL CA,O=泰尔认证中心有限公司,C=CN",
+      "subjectDN": "MFIxCzAJBgNVBAYTAkNOMScwJQYDVQQKDB7ms7DlsJTorqTor4HkuK3lv4PmnInpmZDlhazlj7gxGjAYBgNVBAMTEVRMQyBSU0EgRFYgU1NMIENB",
+      "whitelist": false,
+      "attachment": {
+        "hash": "073b414de061470344a5e479bc1062a6ad29bb020678be50adabe1398f670d73",
+        "size": 2215,
+        "filename": "YE8NAiBXY_ACKrjqVig61xRUqLSEjvnI87lBcLzClRo=.pem",
+        "location": "security-state-staging/intermediates/05426970-ec05-43ff-b847-acd8997bd247.pem",
+        "mimetype": "application/x-pem-file"
+      },
+      "pubKeyHash": "YE8NAiBXY/ACKrjqVig61xRUqLSEjvnI87lBcLzClRo=",
+      "crlite_enrolled": false,
+      "id": "da273e4b-b916-497f-bd08-213a8880803e",
+      "last_modified": 1714705023273
+    },
+    {
+      "schema": 1714704843612,
+      "derHash": "F3G/q5oBiq8pT0Txjs7pdpJmkj0yU9ahPwPwxCtbG7Y=",
+      "subject": "CN=TLC RSA OV SSL CA,O=泰尔认证中心有限公司,C=CN",
+      "subjectDN": "MFIxCzAJBgNVBAYTAkNOMScwJQYDVQQKDB7ms7DlsJTorqTor4HkuK3lv4PmnInpmZDlhazlj7gxGjAYBgNVBAMTEVRMQyBSU0EgT1YgU1NMIENB",
+      "whitelist": false,
+      "attachment": {
+        "hash": "8dcdb7d8cc7dabc1dce7ebb85ef6eee7f38e513baff75d29064b55a83f241cba",
+        "size": 2215,
+        "filename": "IzsrJpSzxjilA5JA6B2Dw3M_xVfE27SgLk462nNc9lY=.pem",
+        "location": "security-state-staging/intermediates/6d779fca-ef85-4501-b470-95e37e467635.pem",
+        "mimetype": "application/x-pem-file"
+      },
+      "pubKeyHash": "IzsrJpSzxjilA5JA6B2Dw3M/xVfE27SgLk462nNc9lY=",
+      "crlite_enrolled": false,
+      "id": "4c0ac58e-15e2-4eaa-a0d3-e7d1734bbcf8",
+      "last_modified": 1714705023270
+    },
+    {
+      "schema": 1714427627443,
+      "derHash": "f1eunNLVdKEDdeXd1eIhbK+M9Qt1nMYiJKGEDLg7SCw=",
+      "subject": "CN=TUBITAK Kamu SM SSL Sertifika Hizmet Saglayicisi - Surum 2,O=TUBITAK Kamu Sertifikasyon Merkezi,ST=Kocaeli,C=TR",
+      "subjectDN": "MIGRMQswCQYDVQQGEwJUUjEQMA4GA1UECAwHS29jYWVsaTErMCkGA1UECgwiVFVCSVRBSyBLYW11IFNlcnRpZmlrYXN5b24gTWVya2V6aTFDMEEGA1UEAww6VFVCSVRBSyBLYW11IFNNIFNTTCBTZXJ0aWZpa2EgSGl6bWV0IFNhZ2xheWljaXNpIC0gU3VydW0gMg==",
+      "whitelist": false,
+      "attachment": {
+        "hash": "75a728b640e676b8e595337af1762254cff720fd4ac8135ef117a393a44bd814",
+        "size": 1882,
+        "filename": "Ug8FXxQFGfGFLV5SAvBW4_SeEJGGTkYvNWRN0Kw9nsY=.pem",
+        "location": "security-state-staging/intermediates/39c5e4e0-1563-4742-8514-8f95fc550320.pem",
+        "mimetype": "application/x-pem-file"
+      },
+      "pubKeyHash": "Ug8FXxQFGfGFLV5SAvBW4/SeEJGGTkYvNWRN0Kw9nsY=",
+      "crlite_enrolled": false,
+      "id": "a8041685-8527-4f8b-b58f-159cf26d9259",
+      "last_modified": 1714427823465
+    },
+    {
+      "schema": 1714384143635,
+      "derHash": "NSWCzMhbOUTjzSUF2TGPIqvqQYv/KaD+TSwN8oDyAOM=",
+      "subject": "CN=KeepTrust DV TLS RSA CA G2,O=Shanghai Huandu Info Tech Co. Ltd.,C=CN",
+      "subjectDN": "MF8xCzAJBgNVBAYTAkNOMSswKQYDVQQKEyJTaGFuZ2hhaSBIdWFuZHUgSW5mbyBUZWNoIENvLiBMdGQuMSMwIQYDVQQDExpLZWVwVHJ1c3QgRFYgVExTIFJTQSBDQSBHMg==",
+      "whitelist": false,
+      "attachment": {
+        "hash": "cb1e75148eceed08088a456b7ff90363a57d8da4c80abbf378d19a637786b41c",
+        "size": 2223,
+        "filename": "jO9ialQwHTcCcnf0Nko-La1t7vZFzxL5VXkBOmJv7jg=.pem",
+        "location": "security-state-staging/intermediates/a804f758-b0ec-4f4d-9c9e-511cb91df400.pem",
+        "mimetype": "application/x-pem-file"
+      },
+      "pubKeyHash": "jO9ialQwHTcCcnf0Nko+La1t7vZFzxL5VXkBOmJv7jg=",
+      "crlite_enrolled": false,
+      "id": "76e13e33-5d66-4147-a5ab-4c85170f8b97",
+      "last_modified": 1714384623510
+    },
+    {
+      "schema": 1714384143295,
+      "derHash": "qpzQc3QH6enZ2GsUWiz9fNOFwovPWZaqjZptpfx286I=",
+      "subject": "CN=JoySSL DV Secure Server CA G1,O=JoySSL Limited,C=CN",
+      "subjectDN": "ME4xCzAJBgNVBAYTAkNOMRcwFQYDVQQKEw5Kb3lTU0wgTGltaXRlZDEmMCQGA1UEAxMdSm95U1NMIERWIFNlY3VyZSBTZXJ2ZXIgQ0EgRzE=",
+      "whitelist": false,
+      "attachment": {
+        "hash": "32ccda450ba0deeacc2115bf2d3478e63d9d4b3b15fc6031afcfc5e150655dc6",
+        "size": 2198,
+        "filename": "g2JiZieXxu45iG0JwUld77tedfys3MKpmMM2ouvyhRI=.pem",
+        "location": "security-state-staging/intermediates/a6437d76-0de8-4e88-85a7-6e9ba5cf828f.pem",
+        "mimetype": "application/x-pem-file"
+      },
+      "pubKeyHash": "g2JiZieXxu45iG0JwUld77tedfys3MKpmMM2ouvyhRI=",
+      "crlite_enrolled": false,
+      "id": "72c9deb2-8b62-4cf8-a8a6-40743cc470a3",
+      "last_modified": 1714384623507
+    },
+    {
+      "schema": 1714384142243,
+      "derHash": "zVBVmm3FxwQjfqv5oHC3nwzfwaecOmrIxeceKVoGXQo=",
+      "subject": "CN=KeepTrust OV TLS RSA CA G2,O=Shanghai Huandu Info Tech Co. Ltd.,C=CN",
+      "subjectDN": "MF8xCzAJBgNVBAYTAkNOMSswKQYDVQQKEyJTaGFuZ2hhaSBIdWFuZHUgSW5mbyBUZWNoIENvLiBMdGQuMSMwIQYDVQQDExpLZWVwVHJ1c3QgT1YgVExTIFJTQSBDQSBHMg==",
+      "whitelist": false,
+      "attachment": {
+        "hash": "b30d651b1cf199129209cea1f430fb2b363d57d20eb77b53b6eb37c94224ca5f",
+        "size": 2223,
+        "filename": "DhtTzWZStZsTMTNNO6vo1uEZOd1s-yYx4N1Ln-w4bjk=.pem",
+        "location": "security-state-staging/intermediates/23383e48-0bb4-4174-b350-8772ec15e787.pem",
+        "mimetype": "application/x-pem-file"
+      },
+      "pubKeyHash": "DhtTzWZStZsTMTNNO6vo1uEZOd1s+yYx4N1Ln+w4bjk=",
+      "crlite_enrolled": false,
+      "id": "96114308-dcd6-417f-8831-f2c4a87a2734",
+      "last_modified": 1714384623505
+    },
+    {
+      "schema": 1714384142927,
+      "derHash": "PsEj1x2yeuHcj4dyhsIi9MQWeirk/XvPNweJ70qVIbg=",
+      "subject": "CN=ZoTrus RSA OV SSL CA G1,O=ZoTrus Technology Limited,C=CN",
+      "subjectDN": "MFMxCzAJBgNVBAYTAkNOMSIwIAYDVQQKExlab1RydXMgVGVjaG5vbG9neSBMaW1pdGVkMSAwHgYDVQQDExdab1RydXMgUlNBIE9WIFNTTCBDQSBHMQ==",
+      "whitelist": false,
+      "attachment": {
+        "hash": "04574410ded46eb7bc3d7788bfdac3b8688c8d43491c563568bc5d1a1aa80808",
+        "size": 2207,
+        "filename": "Kg6NFkFHP4nuyrV6WsFy_N3rIzXxOyarWXhBLd8QZ3c=.pem",
+        "location": "security-state-staging/intermediates/d9f96eae-0341-4bfd-be63-a02d45f145ca.pem",
+        "mimetype": "application/x-pem-file"
+      },
+      "pubKeyHash": "Kg6NFkFHP4nuyrV6WsFy/N3rIzXxOyarWXhBLd8QZ3c=",
+      "crlite_enrolled": false,
+      "id": "6e7bdeda-c95b-4230-9b7d-ac18f0c7dcad",
+      "last_modified": 1714384623502
+    },
+    {
+      "schema": 1714384141868,
+      "derHash": "5+8a2UYhSzKvA8woeTDQRk7SwIbXoUR8bif8khfU4Ws=",
+      "subject": "CN=ZoTrus RSA DV SSL CA G1,O=ZoTrus Technology Limited,C=CN",
+      "subjectDN": "MFMxCzAJBgNVBAYTAkNOMSIwIAYDVQQKExlab1RydXMgVGVjaG5vbG9neSBMaW1pdGVkMSAwHgYDVQQDExdab1RydXMgUlNBIERWIFNTTCBDQSBHMQ==",
+      "whitelist": false,
+      "attachment": {
+        "hash": "1e1681f8ac91837d962d38225b3c3a106f0cf2c36ed1d04b2d9e4694e0e86a89",
+        "size": 2207,
+        "filename": "rlXZ4Cf3fWuCzOrRwUo4Kk3-SLmJoSF-dmdULfZE3ZY=.pem",
+        "location": "security-state-staging/intermediates/39754f62-7a5b-4043-8317-99d5625244e9.pem",
+        "mimetype": "application/x-pem-file"
+      },
+      "pubKeyHash": "rlXZ4Cf3fWuCzOrRwUo4Kk3+SLmJoSF+dmdULfZE3ZY=",
+      "crlite_enrolled": false,
+      "id": "a4cd48cf-5e44-4eae-a17b-0d311ec7d609",
+      "last_modified": 1714384623500
+    },
+    {
+      "schema": 1714384142579,
+      "derHash": "DdM/o2bKAoCNKaXBxFZJarUBXDYE6yHBAUBq8lM9mYo=",
+      "subject": "CN=JoySSL OV Secure Server CA G1,O=JoySSL Limited,C=CN",
+      "subjectDN": "ME4xCzAJBgNVBAYTAkNOMRcwFQYDVQQKEw5Kb3lTU0wgTGltaXRlZDEmMCQGA1UEAxMdSm95U1NMIE9WIFNlY3VyZSBTZXJ2ZXIgQ0EgRzE=",
+      "whitelist": false,
+      "attachment": {
+        "hash": "e961da4ab42fd2633d4e7a7970ba2f972ebde2c8bd68a2eac4751f802d2cb816",
+        "size": 2198,
+        "filename": "DgRu4eBFqtUDTN-UkWIoybum_t54rCgrv-U-lRXORBw=.pem",
+        "location": "security-state-staging/intermediates/cdaa5dd0-80c0-4b91-b53f-cd8652ca483f.pem",
+        "mimetype": "application/x-pem-file"
+      },
+      "pubKeyHash": "DgRu4eBFqtUDTN+UkWIoybum/t54rCgrv+U+lRXORBw=",
+      "crlite_enrolled": false,
+      "id": "244aeb2d-bf5f-4431-82a1-1d1744733921",
+      "last_modified": 1714384623497
+    },
+    {
       "schema": 1713801022424,
       "derHash": "XUSUtl0cFO+ZWcU56r4hlZ8aSmiA8T/dsZC4suGFzNw=",
       "subject": "CN=certSIGN Web CA,O=CERTSIGN SA,C=RO",
@@ -26767,24 +27019,6 @@
       "last_modified": 1645578266596
     },
     {
-      "schema": 1645577621120,
-      "derHash": "s0oztER0/bAHjxE1J7vbdv5b+ByiS7htYoE2xQFgQ+g=",
-      "subject": "CN=Certum Class I CA,OU=Certum Certification Authority,O=Unizeto Technologies S.A.,C=PL",
-      "subjectDN": "MHYxCzAJBgNVBAYTAlBMMSIwIAYDVQQKExlVbml6ZXRvIFRlY2hub2xvZ2llcyBTLkEuMScwJQYDVQQLEx5DZXJ0dW0gQ2VydGlmaWNhdGlvbiBBdXRob3JpdHkxGjAYBgNVBAMTEUNlcnR1bSBDbGFzcyBJIENB",
-      "whitelist": false,
-      "attachment": {
-        "hash": "30af05c15084780c6d3ae3b8241e1c92fd060afc921724be7e63675470aeac33",
-        "size": 1711,
-        "filename": "MbF_6zzENJgNMBtdiV6R_9-GZ7l6Nl4QjwF-GW39Yms=.pem",
-        "location": "security-state-staging/intermediates/c2f18743-c18b-4fe1-b235-ecce5a4917d4.pem",
-        "mimetype": "application/x-pem-file"
-      },
-      "pubKeyHash": "MbF/6zzENJgNMBtdiV6R/9+GZ7l6Nl4QjwF+GW39Yms=",
-      "crlite_enrolled": false,
-      "id": "db7340be-ba36-4e17-be92-a5e77a41f0ee",
-      "last_modified": 1645578266555
-    },
-    {
       "schema": 1645577625212,
       "derHash": "Euom9u7v7HarhZJUVAOriFFbAOJ12YiHE0B6hvxcf9c=",
       "subject": "CN=e-Szigno Qualified Organization CA 2017,O=Microsec Ltd.,L=Budapest,C=HU",
@@ -28007,24 +28241,6 @@
       "crlite_enrolled": false,
       "id": "8feb1032-85fe-4d8c-b444-3c69d47c6f6d",
       "last_modified": 1601517442835
-    },
-    {
-      "schema": 1601376765799,
-      "derHash": "2Wy8A7UjzTMVkYZRz0hiFiiH3VY6+yNS0/NLuUV2+T0=",
-      "subject": "CN=Verizon Global Root CA,OU=OmniRoot,O=Verizon Business,C=US",
-      "subjectDN": "MFwxCzAJBgNVBAYTAlVTMRkwFwYDVQQKDBBWZXJpem9uIEJ1c2luZXNzMREwDwYDVQQLDAhPbW5pUm9vdDEfMB0GA1UEAwwWVmVyaXpvbiBHbG9iYWwgUm9vdCBDQQ==",
-      "whitelist": false,
-      "attachment": {
-        "hash": "522a9129b746a60c4aa7d040da0f639b8349b1fee088f3f0ecf8b8101c7e452a",
-        "size": 1760,
-        "filename": "v-gpCYcuRDTxFcUaVhaAGVlNDgPco2PZ87SDnQurzeU=.pem",
-        "location": "security-state-staging/intermediates/98a3c55c-3f5d-4937-9389-3ca882ba85cf.pem",
-        "mimetype": "application/x-pem-file"
-      },
-      "pubKeyHash": "v+gpCYcuRDTxFcUaVhaAGVlNDgPco2PZ87SDnQurzeU=",
-      "crlite_enrolled": false,
-      "id": "62b74836-05bd-4881-9d60-b255969ce226",
-      "last_modified": 1601517442759
     },
     {
       "schema": 1601376738922,
@@ -30691,5 +30907,5 @@
       "last_modified": 1559865884636
     }
   ],
-  "timestamp": 1713887823023
+  "timestamp": 1715637423088
 }

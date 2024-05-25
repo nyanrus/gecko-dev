@@ -8,7 +8,6 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   FirefoxRelay: "resource://gre/modules/FirefoxRelay.sys.mjs",
-  FirefoxRelayTelemetry: "resource://gre/modules/FirefoxRelayTelemetry.mjs",
   FormHistory: "resource://gre/modules/FormHistory.sys.mjs",
   LoginHelper: "resource://gre/modules/LoginHelper.sys.mjs",
 });
@@ -38,23 +37,6 @@ export class FormHistoryParent extends JSWindowActorParent {
       case "FormHistory:RemoveEntry":
         this.#onRemoveEntry(data);
         break;
-
-      case "PasswordManager:offerRelayIntegration": {
-        lazy.FirefoxRelayTelemetry.recordRelayOfferedEvent(
-          "clicked",
-          data.telemetry.flowId,
-          data.telemetry.scenarioName
-        );
-        return this.#offerRelayIntegration();
-      }
-
-      case "PasswordManager:generateRelayUsername": {
-        lazy.FirefoxRelayTelemetry.recordRelayUsernameFilledEvent(
-          "clicked",
-          data.telemetry.flowId
-        );
-        return this.#generateRelayUsername();
-      }
     }
 
     return undefined;
@@ -125,20 +107,6 @@ export class FormHistoryParent extends JSWindowActorParent {
     });
   }
 
-  getRootBrowser() {
-    return this.browsingContext.topFrameElement;
-  }
-
-  async #offerRelayIntegration() {
-    const browser = this.getRootBrowser();
-    return lazy.FirefoxRelay.offerRelayIntegration(browser, this.formOrigin);
-  }
-
-  async #generateRelayUsername() {
-    const browser = this.getRootBrowser();
-    return lazy.FirefoxRelay.generateUsername(browser, this.formOrigin);
-  }
-
   async searchAutoCompleteEntries(searchString, data) {
     const { inputName, scenarioName } = data;
     const params = {
@@ -204,5 +172,13 @@ export class FormHistoryParent extends JSWindowActorParent {
       boundaryCalc += lazy.PREFERENCE_PREFIX_WEIGHT;
     }
     entry.totalScore = Math.round(entry.frecency * Math.max(1, boundaryCalc));
+  }
+
+  previewFields(_result) {
+    // Not implemented
+  }
+
+  autofillFields(_result) {
+    // Not implemented
   }
 }

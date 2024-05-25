@@ -296,6 +296,9 @@ std::pair<sRGBColor, sRGBColor> Theme::ComputeButtonColors(
   bool isHovered = aState.HasState(ElementState::HOVER);
 
   nscolor backgroundColor = [&] {
+    if (aState.HasState(ElementState::AUTOFILL)) {
+      return aColors.SystemNs(StyleSystemColor::MozAutofillBackground);
+    }
     if (isDisabled) {
       return aColors.SystemNs(StyleSystemColor::MozButtondisabledface);
     }
@@ -308,12 +311,6 @@ std::pair<sRGBColor, sRGBColor> Theme::ComputeButtonColors(
     return aColors.SystemNs(StyleSystemColor::Buttonface);
   }();
 
-  if (aState.HasState(ElementState::AUTOFILL)) {
-    backgroundColor = NS_ComposeColors(
-        backgroundColor,
-        aColors.SystemNs(StyleSystemColor::MozAutofillBackground));
-  }
-
   const sRGBColor borderColor =
       ComputeBorderColor(aState, aColors, OutlineCoversBorder::Yes);
   return std::make_pair(sRGBColor::FromABGR(backgroundColor), borderColor);
@@ -323,17 +320,14 @@ std::pair<sRGBColor, sRGBColor> Theme::ComputeTextfieldColors(
     const ElementState& aState, const Colors& aColors,
     OutlineCoversBorder aOutlineCoversBorder) {
   nscolor backgroundColor = [&] {
+    if (aState.HasState(ElementState::AUTOFILL)) {
+      return aColors.SystemNs(StyleSystemColor::MozAutofillBackground);
+    }
     if (aState.HasState(ElementState::DISABLED)) {
       return aColors.SystemNs(StyleSystemColor::MozDisabledfield);
     }
     return aColors.SystemNs(StyleSystemColor::Field);
   }();
-
-  if (aState.HasState(ElementState::AUTOFILL)) {
-    backgroundColor = NS_ComposeColors(
-        backgroundColor,
-        aColors.SystemNs(StyleSystemColor::MozAutofillBackground));
-  }
 
   const sRGBColor borderColor =
       ComputeBorderColor(aState, aColors, aOutlineCoversBorder);
@@ -1105,9 +1099,6 @@ bool Theme::CreateWebRenderCommandsForWidget(
     const mozilla::layers::StackingContextHelper& aSc,
     mozilla::layers::RenderRootStateManager* aManager, nsIFrame* aFrame,
     StyleAppearance aAppearance, const nsRect& aRect) {
-  if (!StaticPrefs::widget_non_native_theme_webrender()) {
-    return false;
-  }
   WebRenderBackendData data{aBuilder, aResources, aSc, aManager};
   return DoDrawWidgetBackground(data, aFrame, aAppearance, aRect,
                                 DrawOverflow::Yes);
@@ -1214,6 +1205,7 @@ bool Theme::DoDrawWidgetBackground(PaintBackendData& aPaintData,
     case StyleAppearance::Textarea:
     case StyleAppearance::Textfield:
     case StyleAppearance::NumberInput:
+    case StyleAppearance::PasswordInput:
       PaintTextField(aPaintData, devPxRect, elementState, colors, dpiRatio);
       break;
     case StyleAppearance::Listbox:
@@ -1358,7 +1350,6 @@ void Theme::PaintAutoStyleOutline(nsIFrame* aFrame,
                                   const LayoutDeviceRect& aRect,
                                   const Colors& aColors, DPIRatio aDpiRatio) {
   const auto& accentColor = aColors.Accent();
-  const bool solid = StaticPrefs::widget_non_native_theme_solid_outline_style();
   LayoutDeviceCoord strokeWidth(ThemeDrawing::SnapBorderWidth(2.0f, aDpiRatio));
 
   LayoutDeviceRect rect(aRect);
@@ -1418,10 +1409,6 @@ void Theme::PaintAutoStyleOutline(nsIFrame* aFrame,
                           : accentColor.Get();
   DrawRect(primaryColor);
 
-  if (solid) {
-    return;
-  }
-
   offset += strokeWidth;
 
   strokeWidth =
@@ -1441,6 +1428,7 @@ LayoutDeviceIntMargin Theme::GetWidgetBorder(nsDeviceContext* aContext,
     case StyleAppearance::Textfield:
     case StyleAppearance::Textarea:
     case StyleAppearance::NumberInput:
+    case StyleAppearance::PasswordInput:
     case StyleAppearance::Listbox:
     case StyleAppearance::Menulist:
     case StyleAppearance::MenulistButton:
@@ -1493,9 +1481,7 @@ bool Theme::GetWidgetOverflow(nsDeviceContext* aContext, nsIFrame* aFrame,
   CSSIntMargin overflow;
   switch (aAppearance) {
     case StyleAppearance::FocusOutline: {
-      // 2px * one segment, or 2px + 1px
-      const auto width =
-          StaticPrefs::widget_non_native_theme_solid_outline_style() ? 2 : 3;
+      const auto width = 3;
       overflow.SizeTo(width, width, width, width);
       break;
     }
@@ -1509,6 +1495,7 @@ bool Theme::GetWidgetOverflow(nsDeviceContext* aContext, nsIFrame* aFrame,
     case StyleAppearance::Textarea:
     case StyleAppearance::Textfield:
     case StyleAppearance::NumberInput:
+    case StyleAppearance::PasswordInput:
     case StyleAppearance::Listbox:
     case StyleAppearance::MenulistButton:
     case StyleAppearance::Menulist:
@@ -1684,6 +1671,7 @@ bool Theme::ThemeSupportsWidget(nsPresContext* aPresContext, nsIFrame* aFrame,
     case StyleAppearance::Menulist:
     case StyleAppearance::MenulistButton:
     case StyleAppearance::NumberInput:
+    case StyleAppearance::PasswordInput:
     case StyleAppearance::MozMenulistArrowButton:
     case StyleAppearance::SpinnerUpbutton:
     case StyleAppearance::SpinnerDownbutton:

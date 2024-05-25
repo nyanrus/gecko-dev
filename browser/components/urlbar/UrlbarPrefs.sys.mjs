@@ -65,7 +65,7 @@ const PREF_URLBAR_DEFAULTS = new Map([
   ["autoFill.stddevMultiplier", [0.0, "float"]],
 
   // Feature gate pref for clipboard suggestions in the urlbar.
-  ["clipboard.featureGate", true],
+  ["clipboard.featureGate", false],
 
   // Whether to show a link for using the search functionality provided by the
   // active view if the the view utilizes OpenSearch.
@@ -466,12 +466,6 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // Untrim url, when urlbar is focused.
   // Note: This pref will be removed once the feature is stable.
   ["untrimOnUserInteraction.featureGate", false],
-
-  // Controls the empty search behavior in Search Mode:
-  //  0 - Show nothing
-  //  1 - Show search history
-  //  2 - Show search and browsing history
-  ["update2.emptySearchBehavior", 0],
 
   // Feature gate pref for weather suggestions in the urlbar.
   ["weather.featureGate", false],

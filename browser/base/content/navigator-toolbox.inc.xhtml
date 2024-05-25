@@ -210,7 +210,7 @@
                    onclick="gIdentityHandler.handleIdentityButtonEvent(event); PageProxyClickHandler(event);"
                    onkeypress="gIdentityHandler.handleIdentityButtonEvent(event);">
                 <image id="identity-icon"/>
-                <label id="identity-icon-label" class="plain" crop="center" flex="1"/>
+                <label id="identity-icon-label" crop="center" flex="1"/>
               </box>
               <box id="identity-permission-box"
                    data-l10n-id="urlbar-permissions-granted"
@@ -512,12 +512,12 @@
            customizable="true">
     <toolbartabstop skipintoolbarset="true"/>
 
-    <hbox id="personal-toolbar-empty" skipintoolbarset="true" removable="false" hidden="true">
+    <hbox id="personal-toolbar-empty" skipintoolbarset="true" removable="false" hidden="true" role="alert">
       <description id="personal-toolbar-empty-description"
                    data-l10n-id="bookmarks-toolbar-empty-message"
                    onclick="BookmarkingUI.openLibraryIfLinkClicked(event);"
                    onkeydown="BookmarkingUI.openLibraryIfLinkClicked(event);">
-        <html:a data-l10n-name="manage-bookmarks" class="text-link" tabindex="0"/>
+        <html:a data-l10n-name="manage-bookmarks" class="text-link" tabindex="0" role="link"/>
       </description>
     </hbox>
 
@@ -621,7 +621,7 @@
         <menuitem id="BMB_viewBookmarksSidebar"
                   data-l10n-id="bookmarks-tools-sidebar-visibility"
                   data-l10n-args='{ "isVisible": false }'
-                  oncommand="SidebarUI.toggle('viewBookmarksSidebar');"
+                  oncommand="SidebarController.toggle('viewBookmarksSidebar');"
                   key="viewBookmarksSidebarKb"/>
         <menuitem id="BMB_searchBookmarks"
                   data-l10n-id="bookmarks-search"

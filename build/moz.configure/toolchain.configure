@@ -1208,7 +1208,11 @@ target_sysroot = sysroot(target)
 def system_lib_option(name, *args, **kwargs):
     option(name, *args, **kwargs)
 
-    @depends(name, target_sysroot.bootstrapped)
+    @depends(
+        name,
+        target_sysroot.bootstrapped,
+        when=kwargs.get("when"),
+    )
     def no_system_lib_in_sysroot(value, bootstrapped):
         if bootstrapped and value:
             die(
@@ -1720,7 +1724,9 @@ host_windows_abi = windows_abi(host, host_c_compiler)
 
 # Generic compiler-based conditions.
 building_with_gcc = depends(c_compiler)(lambda info: info.type == "gcc")
-building_with_gnu_cc = depends(c_compiler)(lambda info: info.type != "clang-cl")
+building_with_gnu_compatible_cc = depends(c_compiler)(
+    lambda info: info.type != "clang-cl"
+)
 
 
 @depends(cxx_compiler, ccache_prefix)
@@ -2151,13 +2157,13 @@ try_compile(
 def default_debug_flags(compiler_info, target):
     # Debug info is ON by default.
     if compiler_info.type == "clang-cl":
-        return "-Z7"
+        return ("-Z7",)
     elif target.kernel == "WINNT" and compiler_info.type == "clang":
-        return "-g -gcodeview"
+        return ("-g", "-gcodeview")
     # The oldest versions of supported compilers default to DWARF-4, but
     # newer versions may default to DWARF-5 or newer (e.g. clang 14), which
     # Valgrind doesn't support. Force-use DWARF-4.
-    return "-gdwarf-4"
+    return ("-gdwarf-4",)
 
 
 option(env="MOZ_DEBUG_FLAGS", nargs=1, help="Debug compiler flags")
@@ -2174,14 +2180,15 @@ set_config("MOZ_DEBUG_SYMBOLS", depends_if("--enable-debug-symbols")(lambda _: T
 
 
 @depends("MOZ_DEBUG_FLAGS", "--enable-debug-symbols", default_debug_flags)
+@imports(_from="mozbuild.shellutil", _import="split")
 def debug_flags(env_debug_flags, enable_debug_flags, default_debug_flags):
     # If MOZ_DEBUG_FLAGS is set, and --enable-debug-symbols is set to a value,
     # --enable-debug-symbols takes precedence. Note, the value of
     # --enable-debug-symbols may be implied by --enable-debug.
     if len(enable_debug_flags):
-        return enable_debug_flags[0]
+        return split(enable_debug_flags[0])
     if env_debug_flags:
-        return env_debug_flags[0]
+        return split(env_debug_flags[0])
     return default_debug_flags
 
 
@@ -3309,9 +3316,19 @@ def nm_names(toolchain_prefix, c_compiler):
 check_prog("NM", nm_names, paths=clang_search_path, when=target_has_linux_kernel)
 
 
+# We don't use it in the code, but it can be useful for debugging, so give
+# the user the option of enabling it.
 option("--enable-cpp-rtti", help="Enable C++ RTTI")
 
-add_old_configure_assignment("_MOZ_USE_RTTI", "1", when="--enable-cpp-rtti")
+
+@depends(compilation_flags, c_compiler, "--enable-cpp-rtti")
+def enable_cpp_rtti(compilation_flags, c_compiler, enable_rtti):
+    if enable_rtti:
+        return
+    if c_compiler.type == "clang-cl":
+        compilation_flags.cxxflags.append("-GR-")
+    else:
+        compilation_flags.cxxflags.append("-fno-rtti")
 
 
 option(

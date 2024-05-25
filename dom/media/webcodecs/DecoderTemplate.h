@@ -49,39 +49,40 @@ class DecoderTemplate : public DOMEventTargetHelper {
 
   class ControlMessage {
    public:
-    explicit ControlMessage(const nsACString& aTitle);
+    ControlMessage(WebCodecsId aConfigId) : mConfigId(aConfigId) {};
     virtual ~ControlMessage() = default;
     virtual void Cancel() = 0;
     virtual bool IsProcessing() = 0;
 
-    virtual const nsCString& ToString() const { return mTitle; }
+    virtual nsCString ToString() const = 0;
     virtual ConfigureMessage* AsConfigureMessage() { return nullptr; }
     virtual DecodeMessage* AsDecodeMessage() { return nullptr; }
     virtual FlushMessage* AsFlushMessage() { return nullptr; }
 
-    const nsCString mTitle;  // Used to identify the message in the logs.
+    // All the control message follows a specific configuration. Knowing the
+    // associated configuration of a decode/flush request is helpful in
+    // debugging logs. This id is used to identify which ConfigureMessage the
+    // request follows.
+    const WebCodecsId mConfigId;
   };
 
   class ConfigureMessage final
       : public ControlMessage,
         public MessageRequestHolder<DecoderAgent::ConfigurePromise> {
    public:
-    using Id = DecoderAgent::Id;
-    static constexpr Id NoId = 0;
     static ConfigureMessage* Create(UniquePtr<ConfigTypeInternal>&& aConfig);
 
     ~ConfigureMessage() = default;
     virtual void Cancel() override { Disconnect(); }
     virtual bool IsProcessing() override { return Exists(); };
+    virtual nsCString ToString() const override;
     virtual ConfigureMessage* AsConfigureMessage() override { return this; }
     const ConfigTypeInternal& Config() { return *mConfig; }
     UniquePtr<ConfigTypeInternal> TakeConfig() { return std::move(mConfig); }
 
-    // The id of a configure request.
-    const Id mId;
-
    private:
-    ConfigureMessage(Id aId, UniquePtr<ConfigTypeInternal>&& aConfig);
+    ConfigureMessage(WebCodecsId aConfigId,
+                     UniquePtr<ConfigTypeInternal>&& aConfig);
 
     UniquePtr<ConfigTypeInternal> mConfig;
   };
@@ -90,18 +91,17 @@ class DecoderTemplate : public DOMEventTargetHelper {
       : public ControlMessage,
         public MessageRequestHolder<DecoderAgent::DecodePromise> {
    public:
-    using SeqId = size_t;
-    using ConfigId = typename Self::ConfigureMessage::Id;
-    DecodeMessage(SeqId aSeqId, ConfigId aConfigId,
+    DecodeMessage(WebCodecsId aSeqId, WebCodecsId aConfigId,
                   UniquePtr<InputTypeInternal>&& aData);
     ~DecodeMessage() = default;
     virtual void Cancel() override { Disconnect(); }
     virtual bool IsProcessing() override { return Exists(); };
+    virtual nsCString ToString() const override;
     virtual DecodeMessage* AsDecodeMessage() override { return this; }
 
     // The sequence id of a decode request associated with a specific
     // configuration.
-    const SeqId mSeqId;
+    const WebCodecsId mSeqId;
     UniquePtr<InputTypeInternal> mData;
   };
 
@@ -109,17 +109,16 @@ class DecoderTemplate : public DOMEventTargetHelper {
       : public ControlMessage,
         public MessageRequestHolder<DecoderAgent::DecodePromise> {
    public:
-    using SeqId = size_t;
-    using ConfigId = typename Self::ConfigureMessage::Id;
-    FlushMessage(SeqId aSeqId, ConfigId aConfigId);
+    FlushMessage(WebCodecsId aSeqId, WebCodecsId aConfigId);
     ~FlushMessage() = default;
     virtual void Cancel() override { Disconnect(); }
     virtual bool IsProcessing() override { return Exists(); };
+    virtual nsCString ToString() const override;
     virtual FlushMessage* AsFlushMessage() override { return this; }
 
     // The sequence id of a flush request associated with a specific
     // configuration.
-    const SeqId mSeqId;
+    const WebCodecsId mSeqId;
     const int64_t mUniqueId;
   };
 
@@ -155,7 +154,7 @@ class DecoderTemplate : public DOMEventTargetHelper {
       const ConfigTypeInternal& aConfig) = 0;
   virtual nsTArray<RefPtr<OutputType>> DecodedDataToOutputType(
       nsIGlobalObject* aGlobalObject, const nsTArray<RefPtr<MediaData>>&& aData,
-      ConfigTypeInternal& aConfig) = 0;
+      const ConfigTypeInternal& aConfig) = 0;
 
  protected:
   // DecoderTemplate can run on either main thread or worker thread.
@@ -172,7 +171,8 @@ class DecoderTemplate : public DOMEventTargetHelper {
 
   MOZ_CAN_RUN_SCRIPT void ReportError(const nsresult& aResult);
   MOZ_CAN_RUN_SCRIPT void OutputDecodedData(
-      const nsTArray<RefPtr<MediaData>>&& aData);
+      const nsTArray<RefPtr<MediaData>>&& aData,
+      const ConfigTypeInternal& aConfig);
 
   void ScheduleDequeueEventIfNeeded();
   nsresult FireEvent(nsAtom* aTypeWithOn, const nsAString& aEventType);
@@ -214,7 +214,7 @@ class DecoderTemplate : public DOMEventTargetHelper {
   // When a flush request is initiated, a promise is created and stored in
   // mPendingFlushPromises until it is settled in the task delivering the flush
   // result or Reset() is called before the promise is settled.
-  SimpleMap<RefPtr<Promise>> mPendingFlushPromises;
+  SimpleMap<int64_t, RefPtr<Promise>> mPendingFlushPromises;
 
   uint32_t mDecodeQueueSize;
   bool mDequeueEventScheduled;

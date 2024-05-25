@@ -2,7 +2,7 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
-requestLongerTimeout(3);
+requestLongerTimeout(4);
 
 /*
  * This tests that when we have an animated image in a minimized window we
@@ -46,21 +46,35 @@ async function pushPrefs1() {
   });
 }
 
-async function openWindowsAndMinimize(taskToPerformBeforeMinimize) {
+// maximize = false then minimize all windows but the last one
+// this tests that minimized windows don't accumulate animated images frames
+// maximize = true then maximize the last window
+// this tests that occluded windows don't accumulate animated images frames
+async function openWindows(maximize, taskToPerformBeforeSizeChange) {
   let wins = [null, null, null, null];
   for (let i = 0; i < wins.length; i++) {
     let win = await BrowserTestUtils.openNewBrowserWindow();
     await win.delayedStartupPromise;
-    await taskToPerformBeforeMinimize(win);
+    await taskToPerformBeforeSizeChange(win);
 
-    // Leave the last window un-minimized.
-    if (i < wins.length - 1) {
-      let promiseSizeModeChange = BrowserTestUtils.waitForEvent(
-        win,
-        "sizemodechange"
-      );
-      win.minimize();
-      await promiseSizeModeChange;
+    if (
+      (!maximize && i < wins.length - 1) ||
+      (maximize && i == wins.length - 1)
+    ) {
+      // the window might be maximized already, but it won't be minimized, only wait for
+      // size change if the size is actually changing.
+      if (!maximize || (maximize && win.windowState != win.STATE_MAXIMIZED)) {
+        let promiseSizeModeChange = BrowserTestUtils.waitForEvent(
+          win,
+          "sizemodechange"
+        );
+        if (maximize) {
+          win.maximize();
+        } else {
+          win.minimize();
+        }
+        await promiseSizeModeChange;
+      }
     }
 
     wins[i] = win;
@@ -79,9 +93,9 @@ async function pushPrefs2() {
 }
 
 async function waitForEnoughFrames() {
-  // we want to wait for over 75 frames of the image, it has a delay of 33ms
+  // we want to wait for over 75 frames of the image, it has a delay of 200ms
   // Windows debug test machines seem to animate at about 10 fps though
-  await new Promise(resolve => setTimeout(resolve, 10000));
+  await new Promise(resolve => setTimeout(resolve, 20000));
 }
 
 async function closeWindows(wins) {
@@ -96,10 +110,10 @@ async function popPrefs() {
 }
 
 add_task(async () => {
-  async function runTest(theTestPath) {
+  async function runTest(theTestPath, maximize) {
     await pushPrefs1();
 
-    let wins = await openWindowsAndMinimize(async function (win) {
+    let wins = await openWindows(maximize, async function (win) {
       let tab = await BrowserTestUtils.openNewForegroundTab(
         win.gBrowser,
         theTestPath
@@ -124,16 +138,21 @@ add_task(async () => {
   }
 
   // This tests the image in content process case
-  await runTest(fileURL("helper_animatedImageLeak.html"));
+  let contentURL = fileURL("helper_animatedImageLeak.html");
+  await runTest(contentURL, /* maximize = */ true);
+  await runTest(contentURL, /* maximize = */ false);
+
   // This tests the image in chrome process case
-  await runTest(getRootDirectory(gTestPath) + "helper_animatedImageLeak.html");
+  let chromeURL = getRootDirectory(gTestPath) + "helper_animatedImageLeak.html";
+  await runTest(chromeURL, /* maximize = */ true);
+  await runTest(chromeURL, /* maximize = */ false);
 });
 
 // Now we test the image in a sidebar loaded via an extension case.
 
 /*
  * The data uri below is a 2kb apng that is 3000x200 with 22 frames with delay
- * of 33ms, it just toggles the color of one pixel from black to red so it's
+ * of 200ms, it just toggles the color of one pixel from black to red so it's
  * tiny. We use the same data uri (although that is not important to this test)
  * in helper_animatedImageLeak.html.
  */
@@ -159,7 +178,7 @@ let extData = {
     <script src="sidebar.js"></script>
   </head>
   <body><p>Sidebar</p>
-  <img src="data:image/png;base64,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"/>
+  <img src="data:image/png;base64,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"/>
   </body>
 </html>
     `,
@@ -188,39 +207,47 @@ async function sendMessage(ext, msg, data = undefined) {
 }
 
 add_task(async function sidebar_initial_install() {
-  await pushPrefs1();
+  async function runTest(maximize) {
+    await pushPrefs1();
 
-  ok(
-    document.getElementById("sidebar-box").hidden,
-    "sidebar box is not visible"
-  );
+    ok(
+      document.getElementById("sidebar-box").hidden,
+      "sidebar box is not visible"
+    );
 
-  let extension = ExtensionTestUtils.loadExtension(getExtData());
-  await extension.startup();
-  await extension.awaitMessage("sidebar");
-
-  // Test sidebar is opened on install
-  ok(!document.getElementById("sidebar-box").hidden, "sidebar box is visible");
-
-  // the sidebar appears on all new windows automatically.
-  let wins = await openWindowsAndMinimize(async function (win) {
+    let extension = ExtensionTestUtils.loadExtension(getExtData());
+    await extension.startup();
     await extension.awaitMessage("sidebar");
-  });
 
-  await pushPrefs2();
+    // Test sidebar is opened on install
+    ok(
+      !document.getElementById("sidebar-box").hidden,
+      "sidebar box is visible"
+    );
 
-  await waitForEnoughFrames();
+    // the sidebar appears on all new windows automatically.
+    let wins = await openWindows(maximize, async function (win) {
+      await extension.awaitMessage("sidebar");
+    });
 
-  await extension.unload();
-  // Test that the sidebar was closed on unload.
-  ok(
-    document.getElementById("sidebar-box").hidden,
-    "sidebar box is not visible"
-  );
+    await pushPrefs2();
 
-  await closeWindows(wins);
+    await waitForEnoughFrames();
 
-  await popPrefs();
+    await extension.unload();
+    // Test that the sidebar was closed on unload.
+    ok(
+      document.getElementById("sidebar-box").hidden,
+      "sidebar box is not visible"
+    );
 
-  ok(true, "got here without assserting");
+    await closeWindows(wins);
+
+    await popPrefs();
+
+    ok(true, "got here without assserting");
+  }
+
+  await runTest(/* maximize = */ true);
+  await runTest(/* maximize = */ false);
 });

@@ -1044,9 +1044,6 @@ child:
     // Update the cached list of codec supported in the given process.
     async UpdateMediaCodecsSupported(RemoteDecodeIn aLocation, MediaCodecsSupported aSupported);
 
-    // Send the list of the supported mimetypes in the given process. GeckoView-specific
-    async DecoderSupportedMimeTypes(nsCString[] supportedTypes);
-
     // Used to initialize the global variable in content processes with the
     // latched value in the parent process. See dom/LocalStorageCommon.h for more
     // details.
@@ -1219,7 +1216,7 @@ parent:
     // which is used for content analysis.
     sync GetClipboard(nsCString[] aTypes, int32_t aWhichClipboard,
                       MaybeDiscardedWindowContext aRequestingWindowContext)
-        returns (IPCTransferableData transferableData);
+        returns (IPCTransferableDataOrError transferableDataOrError);
 
     // Requests getting data from clipboard.
     async GetClipboardAsync(nsCString[] aTypes, int32_t aWhichClipboard,
@@ -1734,6 +1731,15 @@ parent:
      */
     async NotifyPositionStateChanged(
         MaybeDiscardedBrowsingContext aContext,
+        PositionState? aState);
+
+    /**
+     * This method is used to update a media's position state whenever its
+     * guessed position state is being updated.
+     */
+    async NotifyGuessedPositionStateChanged(
+        MaybeDiscardedBrowsingContext aContext,
+        nsID aMediaId,
         PositionState? aState);
 
     /**

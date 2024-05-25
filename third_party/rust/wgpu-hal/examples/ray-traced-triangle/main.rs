@@ -372,7 +372,9 @@ impl<A: hal::Api> Example<A> {
                     module: &shader_module,
                     entry_point: "main",
                     constants: &Default::default(),
+                    zero_initialize_workgroup_memory: true,
                 },
+                cache: None,
             })
         }
         .unwrap();

@@ -357,11 +357,6 @@ nsISerialEventTarget* IProtocol::GetActorEventTarget() {
   return GetIPCChannel()->GetWorkerEventTarget();
 }
 
-void IProtocol::SetId(int32_t aId) {
-  MOZ_ASSERT(mId == aId || mLinkStatus == LinkStatus::Inactive);
-  mId = aId;
-}
-
 Maybe<IProtocol*> IProtocol::ReadActor(IPC::MessageReader* aReader,
                                        bool aNullable,
                                        const char* aActorDescription,
@@ -469,22 +464,54 @@ void IProtocol::SetManager(IRefCountedProtocol* aManager) {
 
 bool IProtocol::SetManagerAndRegister(IRefCountedProtocol* aManager,
                                       int32_t aId) {
+  MOZ_RELEASE_ASSERT(mLinkStatus == LinkStatus::Inactive,
+                     "Actor must be inactive to SetManagerAndRegister");
+
+  // Set to `false` if the actor is to be torn down after registration.
+  bool success = true;
+
   // Set the manager prior to registering so registering properly inherits
   // the manager's event target.
   SetManager(aManager);
 
-  mToplevel->RegisterID(this, aId);
+  mId = aId == kNullActorId ? mToplevel->NextId() : aId;
+  while (mToplevel->mActorMap.Contains(mId)) {
+    // The ID already existing is an error case, but we want to proceed with
+    // registration so that we can tear down the actor cleanly - generate a new
+    // ID for that case.
+    NS_WARNING("Actor already exists with the selected ID!");
+    mId = mToplevel->NextId();
+    success = false;
+  }
+
+  RefPtr<ActorLifecycleProxy> proxy = ActorConnected();
+  mToplevel->mActorMap.InsertOrUpdate(mId, proxy);
+  MOZ_ASSERT(proxy->Get() == this);
+
+  UntypedManagedContainer* container =
+      aManager->GetManagedActors(GetProtocolId());
+  if (container) {
+    container->Insert(this);
+  } else {
+    NS_WARNING("Manager does not manage actors with this ProtocolId");
+    success = false;
+  }
 
   // If our manager is already dying, mark ourselves as doomed as well.
-  RefPtr<ActorLifecycleProxy> proxy(mLifecycleProxy);
   if (aManager && aManager->mLinkStatus != LinkStatus::Connected) {
-    MOZ_ASSERT(proxy->Get() == this);
-    proxy->Get()->mLinkStatus = LinkStatus::Doomed;
+    mLinkStatus = LinkStatus::Doomed;
     if (aManager->mLinkStatus != LinkStatus::Doomed) {
-      ActorDisconnected(FailedConstructor);
-      MOZ_ASSERT(mLinkStatus == LinkStatus::Destroyed);
-      return false;
+      // Our manager is already fully dead, make sure we call
+      // `ActorDisconnected`.
+      success = false;
     }
+  }
+
+  // If setting the manager failed, call `ActorDisconnected` and return false.
+  if (!success) {
+    ActorDisconnected(FailedConstructor);
+    MOZ_ASSERT(mLinkStatus == LinkStatus::Destroyed);
+    return false;
   }
   return true;
 }
@@ -524,6 +551,14 @@ void IProtocol::WarnMessageDiscarded(IPC::Message* aMsg) {
                  .get());
 }
 #endif
+
+uint32_t IProtocol::AllManagedActorsCount() const {
+  uint32_t total = 0;
+  for (ProtocolId id : ManagedProtocolIds()) {
+    total += GetManagedActors(id)->Count();
+  }
+  return total;
+}
 
 already_AddRefed<ActorLifecycleProxy> IProtocol::ActorConnected() {
   if (mLinkStatus != LinkStatus::Inactive) {
@@ -575,8 +610,13 @@ void IProtocol::ActorDisconnected(ActorDestroyReason aWhy) {
     int32_t id = actor->mId;
     if (IProtocol* manager = actor->Manager()) {
       actor->mId = kFreedActorId;
-      toplevel->Unregister(id);
-      manager->RemoveManagee(actor->GetProtocolId(), actor);
+      auto entry = toplevel->mActorMap.Lookup(id);
+      MOZ_DIAGNOSTIC_ASSERT(entry && *entry == actor->GetLifecycleProxy(),
+                            "ID must be present and reference this actor");
+      entry.Remove();
+      if (auto* container = manager->GetManagedActors(actor->GetProtocolId())) {
+        container->EnsureRemoved(actor);
+      }
     }
 
     ipcChannel->RejectPendingResponsesForActor(id);
@@ -609,6 +649,30 @@ void IProtocol::ActorDisconnected(ActorDestroyReason aWhy) {
   if (mLinkStatus == LinkStatus::Doomed) {
     doActorDestroy(this, aWhy);
   }
+}
+
+void IProtocol::DoomSubtree() {
+  MOZ_ASSERT(
+      mLinkStatus == LinkStatus::Connected || mLinkStatus == LinkStatus::Doomed,
+      "Invalid link status for SetDoomed");
+  for (ProtocolId id : ManagedProtocolIds()) {
+    for (IProtocol* actor : *GetManagedActors(id)) {
+      actor->DoomSubtree();
+    }
+  }
+  mLinkStatus = LinkStatus::Doomed;
+}
+
+IProtocol* IProtocol::PeekManagedActor() const {
+  for (ProtocolId id : ManagedProtocolIds()) {
+    const UntypedManagedContainer& container = *GetManagedActors(id);
+    if (!container.IsEmpty()) {
+      // Return the last element first, to reduce the copying required when
+      // removing it.
+      return *(container.end() - 1);
+    }
+  }
+  return nullptr;
 }
 
 IToplevelProtocol::IToplevelProtocol(const char* aName, ProtocolId aProtoId,
@@ -679,26 +743,11 @@ int32_t IToplevelProtocol::NextId() {
   return (++mLastLocalId << 2) | tag;
 }
 
-int32_t IToplevelProtocol::RegisterID(IProtocol* aRouted, int32_t aId) {
-  int32_t id = aId == kNullActorId ? NextId() : aId;
-  aRouted->SetId(id);
-  RefPtr<ActorLifecycleProxy> proxy = aRouted->ActorConnected();
-  MOZ_ASSERT(!mActorMap.Contains(id), "Don't insert with an existing ID");
-  mActorMap.InsertOrUpdate(id, std::move(proxy));
-  return id;
-}
-
 IProtocol* IToplevelProtocol::Lookup(int32_t aId) {
   if (auto entry = mActorMap.Lookup(aId)) {
     return entry.Data()->Get();
   }
   return nullptr;
-}
-
-void IToplevelProtocol::Unregister(int32_t aId) {
-  MOZ_ASSERT(mActorMap.Contains(aId),
-             "Attempting to remove an ID not in the actor map");
-  mActorMap.Remove(aId);
 }
 
 Shmem::SharedMemory* IToplevelProtocol::CreateSharedMemory(size_t aSize,

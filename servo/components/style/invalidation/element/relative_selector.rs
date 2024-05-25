@@ -26,8 +26,8 @@ use dom::ElementState;
 use fxhash::FxHashMap;
 use selectors::matching::{
     matches_compound_selector_from, matches_selector, CompoundSelectorMatchingResult,
-    ElementSelectorFlags, MatchingContext, MatchingForInvalidation, MatchingMode,
-    NeedsSelectorFlags, QuirksMode, SelectorCaches, VisitedHandlingMode,
+    ElementSelectorFlags, IncludeStartingStyle, MatchingContext, MatchingForInvalidation,
+    MatchingMode, NeedsSelectorFlags, QuirksMode, SelectorCaches, VisitedHandlingMode,
 };
 use selectors::parser::{Combinator, SelectorKey};
 use selectors::OpaqueElement;
@@ -544,6 +544,25 @@ where
             },
         );
 
+        map.ts_state_to_selector.lookup_with_additional(
+            element,
+            quirks_mode,
+            None,
+            &[], ElementState::empty(),
+            |dependency| {
+                if !operation.accept(&dependency.dep, element) {
+                    return true;
+                }
+                if dependency.state.avoid_blanket_invalidation_on_dom_mutation() {
+                    // We assume here that these dependencies are handled elsewhere,
+                    // in a more constrained manner.
+                    return true;
+                }
+                self.add_dependency(&dependency.dep, element, scope);
+                true
+            },
+        );
+
         if let Some(v) = map.type_to_selector.get(element.local_name()) {
             for dependency in v {
                 if !operation.accept(dependency, element) {
@@ -822,6 +841,7 @@ where
             None,
             &mut selector_caches,
             VisitedHandlingMode::AllLinksVisitedAndUnvisited,
+            IncludeStartingStyle::No,
             self.quirks_mode,
             NeedsSelectorFlags::No,
             MatchingForInvalidation::Yes,
@@ -1032,6 +1052,7 @@ where
             None,
             selector_caches,
             VisitedHandlingMode::AllLinksVisitedAndUnvisited,
+            IncludeStartingStyle::No,
             quirks_mode,
             NeedsSelectorFlags::No,
             MatchingForInvalidation::Yes,

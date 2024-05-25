@@ -240,6 +240,167 @@ characteristics:
     data_sensitivity:
       - technical
 
+  color_accentcolor:
+    type: quantity
+    unit: RGB
+    description: >
+      The CSS system-color Accentcolor.
+    lifetime: application
+    send_in_pings:
+      - user-characteristics
+    notification_emails:
+      - tom@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1889931
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1889931
+    expires: never
+    data_sensitivity:
+      - technical
+
+  color_accentcolortext:
+    type: quantity
+    unit: RGB
+    description: >
+      The CSS system-color Accentcolortext.
+    lifetime: application
+    send_in_pings:
+      - user-characteristics
+    notification_emails:
+      - tom@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1889931
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1889931
+    expires: never
+    data_sensitivity:
+      - technical
+
+  color_canvas:
+    type: quantity
+    unit: RGB
+    description: >
+      The CSS system-color Canvas.
+    lifetime: application
+    send_in_pings:
+      - user-characteristics
+    notification_emails:
+      - tom@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1889931
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1889931
+    expires: never
+    data_sensitivity:
+      - technical
+
+  color_canvastext:
+    type: quantity
+    unit: RGB
+    description: >
+      The CSS system-color Canvastext.
+    lifetime: application
+    send_in_pings:
+      - user-characteristics
+    notification_emails:
+      - tom@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1889931
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1889931
+    expires: never
+    data_sensitivity:
+      - technical
+
+  color_highlight:
+    type: quantity
+    unit: RGB
+    description: >
+      The CSS system-color Highlight.
+    lifetime: application
+    send_in_pings:
+      - user-characteristics
+    notification_emails:
+      - tom@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1889931
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1889931
+    expires: never
+    data_sensitivity:
+      - technical
+
+  color_highlighttext:
+    type: quantity
+    unit: RGB
+    description: >
+      The CSS system-color Highlighttext.
+    lifetime: application
+    send_in_pings:
+      - user-characteristics
+    notification_emails:
+      - tom@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1889931
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1889931
+    expires: never
+    data_sensitivity:
+      - technical
+
+  color_selecteditem:
+    type: quantity
+    unit: RGB
+    description: >
+      The CSS system-color Selecteditem.
+    lifetime: application
+    send_in_pings:
+      - user-characteristics
+    notification_emails:
+      - tom@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1889931
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1889931
+    expires: never
+    data_sensitivity:
+      - technical
+
+  color_selecteditemtext:
+    type: quantity
+    unit: RGB
+    description: >
+      The CSS system-color Selecteditemtext.
+    lifetime: application
+    send_in_pings:
+      - user-characteristics
+    notification_emails:
+      - tom@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1889931
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1889931
+    expires: never
+    data_sensitivity:
+      - technical
+
+  use_document_colors:
+    type: boolean
+    description: >
+      This is the derived PreferenceSheet::Prefs::mUseDocumentColors value.
+    lifetime: application
+    send_in_pings:
+      - user-characteristics
+    notification_emails:
+      - tom@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1889931
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1889931
+    expires: never
+    data_sensitivity:
+      - interaction
+
   missing_fonts:
     type: text
     description: >
@@ -369,6 +530,33 @@ characteristics:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1882054
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1882054#c3
+    expires: never
+    data_sensitivity:
+      - technical
+
+  gamepads:
+    type: string_list
+    description: >
+      The information of the gamepads inserted on the user device. Each string
+      represents one gamepad. We use a JSON array to describe a gamepad, every
+      value represents one property of the gamepad. Following are the details:
+        index 0: The ID of the game pad
+        index 1: Which hand for the gamepad.
+        index 2: Number of buttons
+        index 3: Number of axes
+        index 4: Number of haptics
+        index 5: Number of lights
+        index 6: Number of touches
+    lifetime: application
+    send_in_pings:
+      - user-characteristics
+    notification_emails:
+      - tom@mozilla.com
+      - tihuang@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1885936
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1885936#c2
     expires: never
     data_sensitivity:
       - technical
@@ -541,7 +729,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -558,7 +746,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -575,7 +763,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -593,7 +781,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -610,7 +798,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -627,7 +815,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -645,7 +833,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -662,7 +850,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -679,7 +867,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -697,7 +885,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -714,7 +902,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -731,7 +919,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -749,7 +937,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -766,7 +954,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -783,7 +971,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -801,7 +989,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -818,7 +1006,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -835,7 +1023,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -853,7 +1041,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -870,7 +1058,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -887,7 +1075,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -905,7 +1093,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -923,7 +1111,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -941,7 +1129,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -959,7 +1147,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -977,7 +1165,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -995,7 +1183,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -1013,7 +1201,7 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
     expires: never
     data_sensitivity:
       - interaction
@@ -1030,7 +1218,25 @@ characteristics:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658
     data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=XXX
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1887658#c4
+    expires: never
+    data_sensitivity:
+      - interaction
+
+  prefs_network_cookie_cookiebehavior: # network.cookie.cookieBehavior
+    type: quantity
+    unit: int
+    description: >
+      Value of the network.cookie.cookieBehavior pref.
+    lifetime: application
+    send_in_pings:
+      - user-characteristics
+    notification_emails:
+      - tom@mozilla.com
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1892474
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1852340#c16
     expires: never
     data_sensitivity:
       - interaction

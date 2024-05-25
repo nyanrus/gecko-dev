@@ -1976,6 +1976,12 @@ JS_PUBLIC_API void JS::SetHostEnsureCanAddPrivateElementHook(
   cx->runtime()->canAddPrivateElement = op;
 }
 
+JS_PUBLIC_API bool JS::SetBrittleMode(JSContext* cx, bool setting) {
+  bool wasBrittle = cx->brittleMode;
+  cx->brittleMode = setting;
+  return wasBrittle;
+}
+
 /*** Standard internal methods **********************************************/
 
 JS_PUBLIC_API bool JS_GetPrototype(JSContext* cx, HandleObject obj,
@@ -4216,27 +4222,6 @@ extern MOZ_NEVER_INLINE JS_PUBLIC_API void JS_AbortIfWrongThread(
   }
 }
 
-#ifdef JS_GC_ZEAL
-JS_PUBLIC_API void JS_GetGCZealBits(JSContext* cx, uint32_t* zealBits,
-                                    uint32_t* frequency,
-                                    uint32_t* nextScheduled) {
-  cx->runtime()->gc.getZealBits(zealBits, frequency, nextScheduled);
-}
-
-JS_PUBLIC_API void JS_SetGCZeal(JSContext* cx, uint8_t zeal,
-                                uint32_t frequency) {
-  cx->runtime()->gc.setZeal(zeal, frequency);
-}
-
-JS_PUBLIC_API void JS_UnsetGCZeal(JSContext* cx, uint8_t zeal) {
-  cx->runtime()->gc.unsetZeal(zeal);
-}
-
-JS_PUBLIC_API void JS_ScheduleGC(JSContext* cx, uint32_t count) {
-  cx->runtime()->gc.setNextScheduled(count);
-}
-#endif
-
 JS_PUBLIC_API void JS_SetParallelParsingEnabled(JSContext* cx, bool enabled) {
   cx->runtime()->setParallelParsingEnabled(enabled);
 }
@@ -4437,6 +4422,12 @@ JS_PUBLIC_API void JS_SetGlobalJitCompilerOption(JSContext* cx,
     case JSJITCOMPILER_WASM_JIT_OPTIMIZING:
       JS::ContextOptionsRef(cx).setWasmIon(!!value);
       break;
+
+#ifdef NIGHTLY_BUILD
+    case JSJITCOMPILER_REGEXP_DUPLICATE_NAMED_GROUPS:
+      jit::JitOptions.js_regexp_duplicate_named_groups = !!value;
+      break;
+#endif
 
 #ifdef DEBUG
     case JSJITCOMPILER_FULL_DEBUG_CHECKS:

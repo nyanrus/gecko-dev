@@ -19,6 +19,7 @@
 #include "mozilla/dom/NodeFilterBinding.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/TreeWalker.h"
+#include "mozilla/FocusModel.h"
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/PresShell.h"
@@ -879,7 +880,7 @@ nsIFrame* AccessibleCaretManager::GetFocusableFrame(nsIFrame* aFrame) const {
   // Look for the nearest enclosing focusable frame.
   nsIFrame* focusableFrame = aFrame;
   while (focusableFrame) {
-    if (focusableFrame->IsFocusable(/* aWithMouse = */ true)) {
+    if (focusableFrame->IsFocusable(IsFocusableFlags::WithMouse)) {
       break;
     }
     focusableFrame = focusableFrame->GetParent();
@@ -1435,7 +1436,7 @@ void AccessibleCaretManager::DispatchCaretStateChangedEvent(
     commonAncestorNode = sel->GetFrameSelection()->GetAncestorLimiter();
   }
 
-  RefPtr<DOMRect> domRect = new DOMRect(ToSupports(doc));
+  auto domRect = MakeRefPtr<DOMRect>(ToSupports(doc));
   nsRect rect = nsLayoutUtils::GetSelectionBoundingRect(sel);
 
   nsIFrame* commonAncestorFrame = nullptr;

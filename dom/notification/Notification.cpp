@@ -161,29 +161,36 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(NotificationStorageCallback)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
+nsCOMPtr<nsINotificationStorage> GetNotificationStorage(bool isPrivate) {
+  return do_GetService(isPrivate ? NS_MEMORY_NOTIFICATION_STORAGE_CONTRACTID
+                                 : NS_NOTIFICATION_STORAGE_CONTRACTID);
+}
+
 class NotificationGetRunnable final : public Runnable {
+  bool mIsPrivate;
   const nsString mOrigin;
   const nsString mTag;
   nsCOMPtr<nsINotificationStorageCallback> mCallback;
 
  public:
   NotificationGetRunnable(const nsAString& aOrigin, const nsAString& aTag,
-                          nsINotificationStorageCallback* aCallback)
+                          nsINotificationStorageCallback* aCallback,
+                          bool aIsPrivate)
       : Runnable("NotificationGetRunnable"),
+        mIsPrivate(aIsPrivate),
         mOrigin(aOrigin),
         mTag(aTag),
         mCallback(aCallback) {}
 
   NS_IMETHOD
   Run() override {
-    nsresult rv;
     nsCOMPtr<nsINotificationStorage> notificationStorage =
-        do_GetService(NS_NOTIFICATION_STORAGE_CONTRACTID, &rv);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
+        GetNotificationStorage(mIsPrivate);
+    if (NS_WARN_IF(!notificationStorage)) {
+      return NS_ERROR_UNEXPECTED;
     }
 
-    rv = notificationStorage->Get(mOrigin, mTag, mCallback);
+    nsresult rv = notificationStorage->Get(mOrigin, mTag, mCallback);
     // XXXnsm Is it guaranteed mCallback will be called in case of failure?
     Unused << NS_WARN_IF(NS_FAILED(rv));
     return rv;
@@ -801,7 +808,8 @@ Notification::ConstructFromFields(
   MOZ_ASSERT(aGlobal);
 
   RootedDictionary<NotificationOptions> options(RootingCx());
-  options.mDir = Notification::StringToDirection(nsString(aDir));
+  options.mDir = StringToEnum<NotificationDirection>(aDir).valueOr(
+      NotificationDirection::Auto);
   options.mLang = aLang;
   options.mBody = aBody;
   options.mTag = aTag;
@@ -822,15 +830,15 @@ Notification::ConstructFromFields(
 
 nsresult Notification::PersistNotification() {
   AssertIsOnMainThread();
-  nsresult rv;
+
   nsCOMPtr<nsINotificationStorage> notificationStorage =
-      do_GetService(NS_NOTIFICATION_STORAGE_CONTRACTID, &rv);
-  if (NS_FAILED(rv)) {
-    return rv;
+      GetNotificationStorage(IsInPrivateBrowsing());
+  if (NS_WARN_IF(!notificationStorage)) {
+    return NS_ERROR_UNEXPECTED;
   }
 
   nsString origin;
-  rv = GetOrigin(GetPrincipal(), origin);
+  nsresult rv = GetOrigin(GetPrincipal(), origin);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -846,9 +854,9 @@ nsresult Notification::PersistNotification() {
     return NS_ERROR_FAILURE;
   }
 
-  rv = notificationStorage->Put(origin, id, mTitle, DirectionToString(mDir),
-                                mLang, mBody, mTag, mIconUrl, alertName,
-                                mDataAsBase64, behavior, mScope);
+  rv = notificationStorage->Put(origin, id, mTitle, GetEnumString(mDir), mLang,
+                                mBody, mTag, mIconUrl, alertName, mDataAsBase64,
+                                behavior, mScope);
 
   if (NS_FAILED(rv)) {
     return rv;
@@ -862,7 +870,7 @@ void Notification::UnpersistNotification() {
   AssertIsOnMainThread();
   if (IsStored()) {
     nsCOMPtr<nsINotificationStorage> notificationStorage =
-        do_GetService(NS_NOTIFICATION_STORAGE_CONTRACTID);
+        GetNotificationStorage(IsInPrivateBrowsing());
     if (notificationStorage) {
       nsString origin;
       nsresult rv = GetOrigin(GetPrincipal(), origin);
@@ -1005,9 +1013,10 @@ class ServiceWorkerNotificationObserver final : public nsIObserver {
 
   ServiceWorkerNotificationObserver(
       const nsAString& aScope, nsIPrincipal* aPrincipal, const nsAString& aID,
-      const nsAString& aTitle, const nsAString& aDir, const nsAString& aLang,
-      const nsAString& aBody, const nsAString& aTag, const nsAString& aIcon,
-      const nsAString& aData, const nsAString& aBehavior)
+      const nsAString& aTitle, NotificationDirection aDir,
+      const nsAString& aLang, const nsAString& aBody, const nsAString& aTag,
+      const nsAString& aIcon, const nsAString& aData,
+      const nsAString& aBehavior)
       : mScope(aScope),
         mID(aID),
         mPrincipal(aPrincipal),
@@ -1030,7 +1039,7 @@ class ServiceWorkerNotificationObserver final : public nsIObserver {
   const nsString mID;
   nsCOMPtr<nsIPrincipal> mPrincipal;
   const nsString mTitle;
-  const nsString mDir;
+  const NotificationDirection mDir;
   const nsString mLang;
   const nsString mBody;
   const nsString mTag;
@@ -1235,14 +1244,16 @@ ServiceWorkerNotificationObserver::Observe(nsISupports* aSubject,
       }
 
       rv = swm->SendNotificationClickEvent(
-          originSuffix, NS_ConvertUTF16toUTF8(mScope), mID, mTitle, mDir, mLang,
-          mBody, mTag, mIcon, mData, mBehavior);
+          originSuffix, NS_ConvertUTF16toUTF8(mScope), mID, mTitle,
+          NS_ConvertASCIItoUTF16(GetEnumString(mDir)), mLang, mBody, mTag,
+          mIcon, mData, mBehavior);
       Unused << NS_WARN_IF(NS_FAILED(rv));
     } else {
       auto* cc = ContentChild::GetSingleton();
       NotificationEventData data(originSuffix, NS_ConvertUTF16toUTF8(mScope),
-                                 mID, mTitle, mDir, mLang, mBody, mTag, mIcon,
-                                 mData, mBehavior);
+                                 mID, mTitle,
+                                 NS_ConvertASCIItoUTF16(GetEnumString(mDir)),
+                                 mLang, mBody, mTag, mIcon, mData, mBehavior);
       Unused << cc->SendNotificationEvent(u"click"_ns, data);
     }
     return NS_OK;
@@ -1257,7 +1268,7 @@ ServiceWorkerNotificationObserver::Observe(nsISupports* aSubject,
 
     // Remove closed or dismissed persistent notifications.
     nsCOMPtr<nsINotificationStorage> notificationStorage =
-        do_GetService(NS_NOTIFICATION_STORAGE_CONTRACTID);
+        GetNotificationStorage(mPrincipal->GetPrivateBrowsingId() != 0);
     if (notificationStorage) {
       notificationStorage->Delete(origin, mID);
     }
@@ -1270,14 +1281,16 @@ ServiceWorkerNotificationObserver::Observe(nsISupports* aSubject,
       }
 
       rv = swm->SendNotificationCloseEvent(
-          originSuffix, NS_ConvertUTF16toUTF8(mScope), mID, mTitle, mDir, mLang,
-          mBody, mTag, mIcon, mData, mBehavior);
+          originSuffix, NS_ConvertUTF16toUTF8(mScope), mID, mTitle,
+          NS_ConvertASCIItoUTF16(GetEnumString(mDir)), mLang, mBody, mTag,
+          mIcon, mData, mBehavior);
       Unused << NS_WARN_IF(NS_FAILED(rv));
     } else {
       auto* cc = ContentChild::GetSingleton();
       NotificationEventData data(originSuffix, NS_ConvertUTF16toUTF8(mScope),
-                                 mID, mTitle, mDir, mLang, mBody, mTag, mIcon,
-                                 mData, mBehavior);
+                                 mID, mTitle,
+                                 NS_ConvertASCIItoUTF16(GetEnumString(mDir)),
+                                 mLang, mBody, mTag, mIcon, mData, mBehavior);
       Unused << cc->SendNotificationEvent(u"close"_ns, data);
     }
     return NS_OK;
@@ -1410,8 +1423,8 @@ void Notification::ShowInternal() {
       behavior.Truncate();
     }
     observer = new ServiceWorkerNotificationObserver(
-        mScope, GetPrincipal(), mID, mTitle, DirectionToString(mDir), mLang,
-        mBody, mTag, iconUrl, mDataAsBase64, behavior);
+        mScope, GetPrincipal(), mID, mTitle, mDir, mLang, mBody, mTag, iconUrl,
+        mDataAsBase64, behavior);
   }
   MOZ_ASSERT(observer);
   nsCOMPtr<nsIObserver> alertObserver =
@@ -1434,10 +1447,10 @@ void Notification::ShowInternal() {
       do_CreateInstance(ALERT_NOTIFICATION_CONTRACTID);
   NS_ENSURE_TRUE_VOID(alert);
   nsIPrincipal* principal = GetPrincipal();
-  rv =
-      alert->Init(alertName, iconUrl, mTitle, mBody, true, uniqueCookie,
-                  DirectionToString(mDir), mLang, mDataAsBase64, GetPrincipal(),
-                  inPrivateBrowsing, requireInteraction, mSilent, mVibrate);
+  rv = alert->Init(alertName, iconUrl, mTitle, mBody, true, uniqueCookie,
+                   NS_ConvertASCIItoUTF16(GetEnumString(mDir)), mLang,
+                   mDataAsBase64, GetPrincipal(), inPrivateBrowsing,
+                   requireInteraction, mSilent, mVibrate);
   NS_ENSURE_SUCCESS_VOID(rv);
 
   if (isPersistent) {
@@ -1708,8 +1721,8 @@ already_AddRefed<Promise> Notification::Get(
   nsCOMPtr<nsINotificationStorageCallback> callback =
       new NotificationStorageCallback(aWindow->AsGlobal(), aScope, promise);
 
-  RefPtr<NotificationGetRunnable> r =
-      new NotificationGetRunnable(origin, aFilter.mTag, callback);
+  RefPtr<NotificationGetRunnable> r = new NotificationGetRunnable(
+      origin, aFilter.mTag, callback, doc->IsInPrivateBrowsing());
 
   aRv = aWindow->AsGlobal()->Dispatch(r.forget());
   if (NS_WARN_IF(aRv.Failed())) {
@@ -1813,25 +1826,26 @@ class WorkerGetRunnable final : public Runnable {
   NS_IMETHOD
   Run() override {
     AssertIsOnMainThread();
-    nsCOMPtr<nsINotificationStorageCallback> callback =
-        new WorkerGetCallback(mPromiseProxy, mScope);
-
-    nsresult rv;
-    nsCOMPtr<nsINotificationStorage> notificationStorage =
-        do_GetService(NS_NOTIFICATION_STORAGE_CONTRACTID, &rv);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      callback->Done();
-      return rv;
-    }
 
     MutexAutoLock lock(mPromiseProxy->Lock());
     if (mPromiseProxy->CleanedUp()) {
       return NS_OK;
     }
 
+    auto* principal = mPromiseProxy->GetWorkerPrivate()->GetPrincipal();
+    auto isPrivate = principal->GetPrivateBrowsingId() != 0;
+
+    nsCOMPtr<nsINotificationStorageCallback> callback =
+        new WorkerGetCallback(mPromiseProxy, mScope);
+
+    nsCOMPtr<nsINotificationStorage> notificationStorage =
+        GetNotificationStorage(isPrivate);
+    if (NS_WARN_IF(!notificationStorage)) {
+      callback->Done();
+      return NS_ERROR_UNEXPECTED;
+    }
     nsString origin;
-    rv = Notification::GetOrigin(
-        mPromiseProxy->GetWorkerPrivate()->GetPrincipal(), origin);
+    nsresult rv = Notification::GetOrigin(principal, origin);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       callback->Done();
       return rv;

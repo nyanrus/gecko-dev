@@ -498,7 +498,7 @@ void BodyConsumer::BeginConsumeBodyMainThread(ThreadSafeWorkerRef* aWorkerRef) {
     return;
   }
 
-  if (mConsumeType == CONSUME_BLOB) {
+  if (mConsumeType == ConsumeType::Blob) {
     nsresult rv;
 
     // If we're trying to consume a blob, and the request was for a blob URI,
@@ -547,7 +547,7 @@ void BodyConsumer::BeginConsumeBodyMainThread(ThreadSafeWorkerRef* aWorkerRef) {
       new ConsumeBodyDoneObserver(this, aWorkerRef);
 
   nsCOMPtr<nsIStreamListener> listener;
-  if (mConsumeType == CONSUME_BLOB) {
+  if (mConsumeType == ConsumeType::Blob) {
     listener = new MutableBlobStreamListener(mBlobStorageType, mBodyMimeType, p,
                                              mMainThreadEventTarget);
   } else {
@@ -672,12 +672,14 @@ void BodyConsumer::ContinueConsumeBody(nsresult aStatus, uint32_t aResultLength,
 
   if (NS_WARN_IF(NS_FAILED(aStatus))) {
     // Per
-    // https://fetch.spec.whatwg.org/#concept-read-all-bytes-from-readablestream
+    // https://streams.spec.whatwg.org/#readablestreamdefaultreader-read-all-bytes
     // Decoding errors should reject with a TypeError
     if (aStatus == NS_ERROR_INVALID_CONTENT_ENCODING) {
       localPromise->MaybeRejectWithTypeError<MSG_DOM_DECODING_FAILED>();
     } else if (aStatus == NS_ERROR_DOM_WRONG_TYPE_ERR) {
       localPromise->MaybeRejectWithTypeError<MSG_FETCH_BODY_WRONG_TYPE>();
+    } else if (aStatus == NS_ERROR_NET_PARTIAL_TRANSFER) {
+      localPromise->MaybeRejectWithTypeError<MSG_FETCH_PARTIAL>();
     } else {
       localPromise->MaybeReject(NS_ERROR_DOM_ABORT_ERR);
     }
@@ -701,24 +703,31 @@ void BodyConsumer::ContinueConsumeBody(nsresult aStatus, uint32_t aResultLength,
   ErrorResult error;
 
   switch (mConsumeType) {
-    case CONSUME_ARRAYBUFFER: {
+    case ConsumeType::ArrayBuffer: {
       JS::Rooted<JSObject*> arrayBuffer(cx);
       BodyUtil::ConsumeArrayBuffer(cx, &arrayBuffer, aResultLength,
                                    std::move(resultPtr), error);
-
       if (!error.Failed()) {
-        JS::Rooted<JS::Value> val(cx);
-        val.setObjectOrNull(arrayBuffer);
-
+        JS::Rooted<JS::Value> val(cx, JS::ObjectValue(*arrayBuffer));
         localPromise->MaybeResolve(val);
       }
       break;
     }
-    case CONSUME_BLOB: {
+    case ConsumeType::Blob: {
       MOZ_CRASH("This should not happen.");
       break;
     }
-    case CONSUME_FORMDATA: {
+    case ConsumeType::Bytes: {
+      JS::Rooted<JSObject*> bytes(cx);
+      BodyUtil::ConsumeBytes(cx, &bytes, aResultLength, std::move(resultPtr),
+                             error);
+      if (!error.Failed()) {
+        JS::Rooted<JS::Value> val(cx, JS::ObjectValue(*bytes));
+        localPromise->MaybeResolve(val);
+      }
+      break;
+    }
+    case ConsumeType::FormData: {
       nsCString data;
       data.Adopt(reinterpret_cast<char*>(resultPtr.release()), aResultLength);
 
@@ -729,13 +738,13 @@ void BodyConsumer::ContinueConsumeBody(nsresult aStatus, uint32_t aResultLength,
       }
       break;
     }
-    case CONSUME_TEXT:
+    case ConsumeType::Text:
       // fall through handles early exit.
-    case CONSUME_JSON: {
+    case ConsumeType::JSON: {
       nsString decoded;
       if (NS_SUCCEEDED(
               BodyUtil::ConsumeText(aResultLength, resultPtr.get(), decoded))) {
-        if (mConsumeType == CONSUME_TEXT) {
+        if (mConsumeType == ConsumeType::Text) {
           localPromise->MaybeResolve(decoded);
         } else {
           JS::Rooted<JS::Value> json(cx);
@@ -760,7 +769,7 @@ void BodyConsumer::ContinueConsumeBody(nsresult aStatus, uint32_t aResultLength,
 void BodyConsumer::ContinueConsumeBlobBody(BlobImpl* aBlobImpl,
                                            bool aShuttingDown) {
   AssertIsOnTargetThread();
-  MOZ_ASSERT(mConsumeType == CONSUME_BLOB);
+  MOZ_ASSERT(mConsumeType == ConsumeType::Blob);
 
   if (mBodyConsumed) {
     return;

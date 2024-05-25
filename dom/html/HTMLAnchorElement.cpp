@@ -14,7 +14,7 @@
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
 #include "nsGkAtoms.h"
-#include "nsAttrValueOrString.h"
+#include "mozilla/FocusModel.h"
 #include "mozilla/dom/Document.h"
 #include "nsPresContext.h"
 #include "nsIURI.h"
@@ -86,10 +86,10 @@ void HTMLAnchorElement::UnbindFromTree(UnbindContext& aContext) {
   Link::UnbindFromTree();
 }
 
-bool HTMLAnchorElement::IsHTMLFocusable(bool aWithMouse, bool* aIsFocusable,
+bool HTMLAnchorElement::IsHTMLFocusable(IsFocusableFlags aFlags,
+                                        bool* aIsFocusable,
                                         int32_t* aTabIndex) {
-  if (nsGenericHTMLElement::IsHTMLFocusable(aWithMouse, aIsFocusable,
-                                            aTabIndex)) {
+  if (nsGenericHTMLElement::IsHTMLFocusable(aFlags, aIsFocusable, aTabIndex)) {
     return true;
   }
 
@@ -119,7 +119,7 @@ bool HTMLAnchorElement::IsHTMLFocusable(bool aWithMouse, bool* aIsFocusable,
     }
   }
 
-  if ((sTabFocusModel & eTabFocus_linksMask) == 0) {
+  if (!FocusModel::IsTabFocusable(TabFocusableType::Links)) {
     *aTabIndex = -1;
   }
   *aIsFocusable = true;
@@ -134,7 +134,7 @@ nsresult HTMLAnchorElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
   return PostHandleEventForAnchors(aVisitor);
 }
 
-void HTMLAnchorElement::GetLinkTarget(nsAString& aTarget) {
+void HTMLAnchorElement::GetLinkTargetImpl(nsAString& aTarget) {
   GetAttr(nsGkAtoms::target, aTarget);
   if (aTarget.IsEmpty()) {
     GetBaseTarget(aTarget);

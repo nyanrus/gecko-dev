@@ -209,8 +209,7 @@ already_AddRefed<Promise> EncoderTemplate<EncoderType>::Flush(
 
   auto msg = MakeRefPtr<FlushMessage>(mLatestConfigureId);
   const auto flushPromiseId = static_cast<int64_t>(msg->mMessageId);
-  DebugOnly<RefPtr<Promise>> unused;
-  MOZ_ASSERT(!mPendingFlushPromises.Find(flushPromiseId, unused));
+  MOZ_ASSERT(!mPendingFlushPromises.Contains(flushPromiseId));
   mPendingFlushPromises.Insert(flushPromiseId, p);
 
   mControlMessageQueue.emplace(std::move(msg));
@@ -338,8 +337,10 @@ void EncoderTemplate<VideoEncoderTraits>::OutputEncodedVideoData(
   // The EncoderType::MetadataType, VideoDecoderConfig, and VideoColorSpaceInit
   // below are rooted to work around the JS hazard issues.
   AutoJSAPI jsapi;
-  DebugOnly<bool> ok =
-      jsapi.Init(GetParentObject());  // TODO: check returned value?
+  if (!jsapi.Init(GetParentObject())) {
+    LOGE("%s %p AutoJSAPI init failed", VideoEncoderTraits::Name.get(), this);
+    return;
+  }
   JSContext* cx = jsapi.cx();
 
   RefPtr<EncodedVideoChunkOutputCallback> cb(mOutputCallback);
@@ -402,8 +403,8 @@ void EncoderTemplate<VideoEncoderTraits>::OutputEncodedVideoData(
 
       metadata.mDecoderConfig.Construct(std::move(decoderConfig));
       mOutputNewDecoderConfig = false;
-      LOGE("New config passed to output callback: %s",
-           decoderConfigInternal.ToString().get());
+      LOG("New config passed to output callback: %s",
+          decoderConfigInternal.ToString().get());
     }
 
     nsAutoCString metadataInfo;
@@ -438,8 +439,10 @@ void EncoderTemplate<AudioEncoderTraits>::OutputEncodedAudioData(
   // The EncoderType::MetadataType, AudioDecoderConfig
   // below are rooted to work around the JS hazard issues.
   AutoJSAPI jsapi;
-  DebugOnly<bool> ok =
-      jsapi.Init(GetParentObject());  // TODO: check returned value?
+  if (!jsapi.Init(GetParentObject())) {
+    LOGE("%s %p AutoJSAPI init failed", AudioEncoderTraits::Name.get(), this);
+    return;
+  }
   JSContext* cx = jsapi.cx();
 
   RefPtr<EncodedAudioChunkOutputCallback> cb(mOutputCallback);
@@ -461,7 +464,7 @@ void EncoderTemplate<AudioEncoderTraits>::OutputEncodedAudioData(
           this->EncoderConfigToDecoderConfig(GetParentObject(), data,
                                              *mActiveConfig);
 
-      // Convert VideoDecoderConfigInternal to VideoDecoderConfig
+      // Convert AudioDecoderConfigInternal to AudioDecoderConfig
       RootedDictionary<AudioDecoderConfig> decoderConfig(cx);
       decoderConfig.mCodec = decoderConfigInternal.mCodec;
       decoderConfig.mNumberOfChannels = decoderConfigInternal.mNumberOfChannels;
@@ -472,8 +475,8 @@ void EncoderTemplate<AudioEncoderTraits>::OutputEncodedAudioData(
 
       metadata.mDecoderConfig.Construct(std::move(decoderConfig));
       mOutputNewDecoderConfig = false;
-      LOGE("New config passed to output callback: %s",
-           decoderConfigInternal.ToString().get());
+      LOG("New config passed to output callback: %s",
+          decoderConfigInternal.ToString().get());
     }
 
     nsAutoCString metadataInfo;
@@ -1090,11 +1093,11 @@ MessageProcessedResult EncoderTemplate<EncoderType>::ProcessFlushMessage(
                      // during the output callback above in the execution of
                      // this task, the promise in mPendingFlushPromises is
                      // handled there. Otherwise, the promise is resolved here.
-                     RefPtr<Promise> p;
-                     if (self->mPendingFlushPromises.Find(flushPromiseId, p)) {
+                     if (Maybe<RefPtr<Promise>> p =
+                             self->mPendingFlushPromises.Take(flushPromiseId)) {
                        LOG("%s %p, resolving the promise for flush %" PRId64,
                            EncoderType::Name.get(), self.get(), flushPromiseId);
-                       p->MaybeResolveWithUndefined();
+                       p.value()->MaybeResolveWithUndefined();
                      }
                    });
                self->mProcessingMessage = nullptr;

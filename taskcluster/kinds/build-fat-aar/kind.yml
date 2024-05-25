@@ -11,6 +11,7 @@ kind-dependencies:
 transforms:
     - gecko_taskgraph.transforms.build:transforms
     - gecko_taskgraph.transforms.build_attrs:transforms
+    - gecko_taskgraph.transforms.build_schedules:transforms
     - gecko_taskgraph.transforms.build_lints:transforms
     - gecko_taskgraph.transforms.build_fat_aar:transforms
     - gecko_taskgraph.transforms.job:transforms
@@ -86,7 +87,6 @@ job-defaults:
                 default: null
     fetches:
         toolchain:
-            - android-gradle-python-envs
             - android-ndk-linux
             - android-sdk-linux
             - linux64-clang

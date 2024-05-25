@@ -97,99 +97,16 @@ const observer = {
     "nsISupportsWeakReference",
   ]),
 
-  // nsIWebProgressListener
-  onLocationChange(aWebProgress, aRequest, aLocation, aFlags) {
-    // Only handle pushState/replaceState here.
-    if (
-      !(aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT) ||
-      !(aWebProgress.loadType & Ci.nsIDocShell.LOAD_CMD_PUSHSTATE)
-    ) {
-      return;
-    }
-
-    const window = aWebProgress.DOMWindow;
-    lazy.log(
-      "onLocationChange handled:",
-      aLocation.displaySpec,
-      window.document
-    );
-    LoginManagerChild.forWindow(window)._onNavigation(window.document);
-  },
-
   onStateChange(aWebProgress, aRequest, aState, _aStatus) {
-    const window = aWebProgress.DOMWindow;
-    const loginManagerChild = () => LoginManagerChild.forWindow(window);
-
     if (
       aState & Ci.nsIWebProgressListener.STATE_RESTORING &&
       aState & Ci.nsIWebProgressListener.STATE_STOP
     ) {
       // Re-fill a document restored from bfcache since password field values
       // aren't persisted there.
-      loginManagerChild()._onDocumentRestored(window.document);
-      return;
-    }
-
-    if (!(aState & Ci.nsIWebProgressListener.STATE_START)) {
-      return;
-    }
-
-    // We only care about when a page triggered a load, not the user. For example:
-    // clicking refresh/back/forward, typing a URL and hitting enter, and loading a bookmark aren't
-    // likely to be when a user wants to save a login.
-    let channel = aRequest.QueryInterface(Ci.nsIChannel);
-    let triggeringPrincipal = channel.loadInfo.triggeringPrincipal;
-    if (
-      triggeringPrincipal.isNullPrincipal ||
-      triggeringPrincipal.equals(
-        Services.scriptSecurityManager.getSystemPrincipal()
-      )
-    ) {
-      return;
-    }
-
-    // Don't handle history navigation, reload, or pushState not triggered via chrome UI.
-    // e.g. history.go(-1), location.reload(), history.replaceState()
-    if (!(aWebProgress.loadType & Ci.nsIDocShell.LOAD_CMD_NORMAL)) {
-      lazy.log(`loadType isn't LOAD_CMD_NORMAL: ${aWebProgress.loadType}.`);
-      return;
-    }
-
-    lazy.log(`Handled channel: ${channel}`);
-    loginManagerChild()._onNavigation(window.document);
-  },
-
-  // nsIObserver
-  observe(subject, topic, _data) {
-    switch (topic) {
-      case "autocomplete-did-enter-text": {
-        let input = subject.QueryInterface(Ci.nsIAutoCompleteInput);
-        let { selectedIndex } = input.popup;
-        if (selectedIndex < 0 || selectedIndex >= input.controller.matchCount) {
-          break;
-        }
-
-        let { focusedInput } = lazy.gFormFillService;
-        if (focusedInput.nodePrincipal.isNullPrincipal) {
-          // If we have a null principal then prevent any more password manager code from running and
-          // incorrectly using the document `location`.
-          return;
-        }
-
-        let window = focusedInput.ownerGlobal;
-        let loginManagerChild = LoginManagerChild.forWindow(window);
-
-        let style = input.controller.getStyleAt(selectedIndex);
-        if (style == "login" || style == "loginWithOrigin") {
-          let details = JSON.parse(
-            input.controller.getCommentAt(selectedIndex)
-          );
-          loginManagerChild.onFieldAutoComplete(focusedInput, details.guid);
-        } else if (style == "generatedPassword") {
-          loginManagerChild._filledWithGeneratedPassword(focusedInput);
-        }
-        break;
-      }
+      const window = aWebProgress.DOMWindow;
+      const loginManagerChild = LoginManagerChild.forWindow(window);
+      loginManagerChild._onDocumentRestored(window.document);
     }
   },
 
@@ -436,9 +353,6 @@ const observer = {
     }
   },
 };
-
-// Add this observer once for the process.
-Services.obs.addObserver(observer, "autocomplete-did-enter-text");
 
 /**
  * Form scenario defines what can be done with form.
@@ -1497,6 +1411,12 @@ export class LoginManagerChild extends JSWindowActorChild {
    */
   #fieldsWithPasswordGenerationForcedOn = new WeakSet();
 
+  /**
+   * Tracks whether the web progress listener that listens for the
+   * restoring of documents from the bfcache is already added
+   */
+  #isListeningForDocumentRestoring = false;
+
   static forWindow(window) {
     return window.windowGlobalChild?.getActor("LoginManager");
   }
@@ -1527,6 +1447,22 @@ export class LoginManagerChild extends JSWindowActorChild {
       }
       case "PasswordManager:formProcessed": {
         this.notifyObserversOfFormProcessed(msg.data.formid);
+        break;
+      }
+      case "PasswordManager:OnFieldAutoComplete": {
+        const { focusedInput } = lazy.gFormFillService;
+        const login = lazy.LoginHelper.vanillaObjectToLogin(msg.data);
+        this.onFieldAutoComplete(focusedInput, login);
+        break;
+      }
+      case "PasswordManager:FillGeneratedPassword": {
+        const { focusedInput } = lazy.gFormFillService;
+        this.filledWithGeneratedPassword(focusedInput);
+        break;
+      }
+      case "PasswordManager:FillRelayUsername": {
+        const { focusedInput } = lazy.gFormFillService;
+        this.fillRelayUsername(focusedInput, msg.data);
         break;
       }
     }
@@ -1621,7 +1557,7 @@ export class LoginManagerChild extends JSWindowActorChild {
         break;
       }
       case "DOMInputPasswordAdded": {
-        this.#onDOMInputPasswordAdded(event, this.document.defaultView);
+        this.#onDOMInputPasswordAdded(event);
         let formLike = lazy.LoginFormFactory.createFromField(
           event.originalTarget
         );
@@ -1629,11 +1565,9 @@ export class LoginManagerChild extends JSWindowActorChild {
         break;
       }
       case "form-submission-detected": {
-        if (lazy.LoginHelper.enabled) {
-          const form = event.detail.form;
-          const reason = event.detail.reason;
-          this.#onFormSubmission(form, reason);
-        }
+        const form = event.detail.form;
+        const reason = event.detail.reason;
+        this.#onFormSubmission(form, reason);
         break;
       }
     }
@@ -1668,20 +1602,21 @@ export class LoginManagerChild extends JSWindowActorChild {
     });
   }
 
-  setupProgressListener(window) {
-    if (!lazy.LoginHelper.formlessCaptureEnabled) {
+  /**
+   * Set up web progress listener that listens for the restoring of a document
+   * from the  bfcache in order to refill the previously autofilled login fields
+   */
+  #ensureDocumentRestoredListenerRegistered() {
+    if (this.#isListeningForDocumentRestoring) {
+      // The web progress listener is already set up
       return;
     }
-
-    // Get the highest accessible docshell and attach the progress listener to that.
-    let docShell;
-    for (
-      let browsingContext = BrowsingContext.getFromWindow(window);
-      browsingContext?.docShell;
-      browsingContext = browsingContext.parent
-    ) {
-      docShell = browsingContext.docShell;
+    // Get the docshell of the process root and attach the progress listener to that.
+    let currentBrowsingContext = this.browsingContext;
+    while (currentBrowsingContext.parent) {
+      currentBrowsingContext = currentBrowsingContext.parent;
     }
+    const docShell = currentBrowsingContext.docShell;
 
     try {
       let webProgress = docShell
@@ -1692,6 +1627,7 @@ export class LoginManagerChild extends JSWindowActorChild {
         Ci.nsIWebProgress.NOTIFY_STATE_DOCUMENT |
           Ci.nsIWebProgress.NOTIFY_LOCATION
       );
+      this.#isListeningForDocumentRestoring = true;
     } catch (ex) {
       // Ignore NS_ERROR_FAILURE if the progress listener was already added
     }
@@ -1803,14 +1739,26 @@ export class LoginManagerChild extends JSWindowActorChild {
   /**
    * Handle form-submission-detected event (dispatched by FormHandlerChild)
    *
+   * Depending on the heuristic that detected the form submission,
+   * the form that is submitted is retrieved differently
+   *
    * @param {HTMLFormElement} form that is being submitted
-   * @param {String} reason form submission reason (heuristic that detected the form submission)
+   * @param {string} reason heuristic that detected the form submission
+   *                        (see FormHandlerChild.FORM_SUBMISSION_REASON)
    */
   #onFormSubmission(form, reason) {
-    // We're invoked before the content's |submit| event handlers, so we
-    // can grab form data before it might be modified (see bug 257781).
-    let formLike = lazy.LoginFormFactory.createFromForm(form);
-    this._onFormSubmit(formLike, reason);
+    switch (reason) {
+      case lazy.FORM_SUBMISSION_REASON.PAGE_NAVIGATION:
+        this._onPageNavigation();
+        break;
+      case lazy.FORM_SUBMISSION_REASON.FORM_SUBMIT_EVENT: {
+        // We're invoked before the content's |submit| event handlers, so we
+        // can grab form data before it might be modified (see bug 257781).
+        let formLike = lazy.LoginFormFactory.createFromForm(form);
+        this._onFormSubmit(formLike, reason);
+        break;
+      }
+    }
   }
 
   onDocumentVisibilityChange(event) {
@@ -1855,12 +1803,15 @@ export class LoginManagerChild extends JSWindowActorChild {
     return Services.cpmm.sharedData.get("isPrimaryPasswordSet");
   }
 
-  #onDOMFormHasPassword(event, window) {
+  #onDOMFormHasPassword(event) {
     if (!event.isTrusted) {
       return;
     }
 
-    this.setupProgressListener(window);
+    if (lazy.LoginHelper.formlessCaptureEnabled) {
+      this.manager.getActor("FormHandler").registerFormSubmissionInterest();
+    }
+    this.#ensureDocumentRestoredListenerRegistered();
 
     const isPrimaryPasswordSet = this.#getIsPrimaryPasswordSet();
     let document = event.target.ownerDocument;
@@ -1951,12 +1902,15 @@ export class LoginManagerChild extends JSWindowActorChild {
       .add(!!usernameField);
   }
 
-  #onDOMInputPasswordAdded(event, window) {
+  #onDOMInputPasswordAdded(event) {
     if (!event.isTrusted) {
       return;
     }
 
-    this.setupProgressListener(window);
+    if (lazy.LoginHelper.formlessCaptureEnabled) {
+      this.manager.getActor("FormHandler").registerFormSubmissionInterest();
+    }
+    this.#ensureDocumentRestoredListenerRegistered();
 
     let pwField = event.originalTarget;
     if (pwField.form) {
@@ -2054,6 +2008,10 @@ export class LoginManagerChild extends JSWindowActorChild {
   _fetchLoginsFromParentAndFillForm(form) {
     if (!lazy.LoginHelper.enabled) {
       return;
+    }
+
+    if (lazy.LoginHelper.formlessCaptureEnabled) {
+      this.manager.getActor("FormHandler").registerFormSubmissionInterest();
     }
 
     // set up input event listeners so we know if the user has interacted with these fields
@@ -2178,7 +2136,7 @@ export class LoginManagerChild extends JSWindowActorChild {
   /**
    * A username or password was autocompleted into a field.
    */
-  onFieldAutoComplete(acInputField, loginGUID) {
+  onFieldAutoComplete(acInputField, login) {
     if (!lazy.LoginHelper.enabled) {
       return;
     }
@@ -2193,7 +2151,7 @@ export class LoginManagerChild extends JSWindowActorChild {
     }
 
     if (lazy.LoginHelper.isUsernameFieldType(acInputField)) {
-      this.onUsernameAutocompleted(acInputField, loginGUID);
+      this.onUsernameAutocompleted(acInputField, [login]);
     } else if (acInputField.hasBeenTypePassword) {
       // Ensure the field gets re-masked and edits don't overwrite the generated
       // password in case a generated password was filled into it previously.
@@ -2207,7 +2165,7 @@ export class LoginManagerChild extends JSWindowActorChild {
    * A username field was filled or tabbed away from so try fill in the
    * associated password in the password field.
    */
-  onUsernameAutocompleted(acInputField, loginGUID = null) {
+  async onUsernameAutocompleted(acInputField, loginsFound = null) {
     lazy.log(`Autocompleting input field with name: ${acInputField.name}`);
 
     let acForm = lazy.LoginFormFactory.createFromField(acInputField);
@@ -2223,43 +2181,49 @@ export class LoginManagerChild extends JSWindowActorChild {
     const docState = this.stateForDocument(acInputField.ownerDocument);
     let { usernameField, newPasswordField: passwordField } =
       docState._getFormFields(acForm, false, recipes);
-    if (usernameField == acInputField) {
-      // Fill the form when a password field is present.
-      if (passwordField) {
-        this._getLoginDataFromParent(acForm, {
-          guid: loginGUID,
-          showPrimaryPassword: false,
-        })
-          .then(({ form, loginsFound, recipes }) => {
-            if (!loginGUID) {
-              // not an explicit autocomplete menu selection, filter for exact matches only
-              loginsFound = this._filterForExactFormOriginLogins(
-                loginsFound,
-                acForm
-              );
-              // filter the list for exact matches with the username
-              // NOTE: this could be an empty string which is a valid username
-              let searchString = usernameField.value.toLowerCase();
-              loginsFound = loginsFound.filter(
-                l => l.username.toLowerCase() == searchString
-              );
-            }
+    // Ignore the event, it's for some input we don't care about.
+    if (usernameField != acInputField) {
+      return;
+    }
 
-            this._fillForm(form, loginsFound, recipes, {
-              autofillForm: true,
-              clobberPassword: true,
-              userTriggered: true,
-            });
-          })
-          .catch(console.error);
-        // Use `loginGUID !== null` to distinguish whether this is called when the
-        // field is filled or tabbed away from. For the latter, don't highlight the field.
-      } else if (loginGUID !== null) {
+    if (!passwordField) {
+      // Use `loginsFound !== null` to distinguish whether this is called when the
+      // field is filled or tabbed away from. For the latter, don't highlight the field.
+      if (loginsFound !== null) {
         LoginFormState._highlightFilledField(usernameField);
       }
-    } else {
-      // Ignore the event, it's for some input we don't care about.
+      return;
     }
+
+    // Fill the form when a password field is present.
+    if (!loginsFound) {
+      const loginData = await this._getLoginDataFromParent(acForm, {
+        showPrimaryPassword: false,
+      }).catch(console.error);
+
+      if (!loginData?.loginsFound.length) {
+        return;
+      }
+
+      // not an explicit autocomplete menu selection, filter for exact matches only
+      loginsFound = this._filterForExactFormOriginLogins(
+        loginData.loginsFound,
+        acForm
+      );
+      // filter the list for exact matches with the username
+      // NOTE: this could be an empty string which is a valid username
+      const searchString = usernameField.value.toLowerCase();
+      loginsFound = loginsFound.filter(
+        l => l.username.toLowerCase() == searchString
+      );
+      recipes = loginData.recipes;
+    }
+
+    this._fillForm(acForm, loginsFound, recipes, {
+      autofillForm: true,
+      clobberPassword: true,
+      userTriggered: true,
+    });
   }
 
   /**
@@ -2273,11 +2237,10 @@ export class LoginManagerChild extends JSWindowActorChild {
   /**
    * Fill a page that was restored from bfcache since we wouldn't receive
    * DOMInputPasswordAdded or DOMFormHasPassword events for it.
-   * @param {Document} aDocument that was restored from bfcache.
    */
-  _onDocumentRestored(aDocument) {
+  _onDocumentRestored() {
     let rootElsWeakSet =
-      lazy.LoginFormFactory.getRootElementsWeakSetForDocument(aDocument);
+      lazy.LoginFormFactory.getRootElementsWeakSetForDocument(this.document);
     let weakLoginFormRootElements =
       ChromeUtils.nondeterministicGetWeakSetKeys(rootElsWeakSet);
 
@@ -2299,16 +2262,13 @@ export class LoginManagerChild extends JSWindowActorChild {
    * Trigger capture on any relevant FormLikes due to a navigation alone (not
    * necessarily due to an actual form submission). This method is used to
    * capture logins for cases where form submit events are not used.
-   *
-   * To avoid multiple notifications for the same LoginForm, this currently
-   * avoids capturing when dealing with a real <form> which are ideally already
-   * using a submit event.
-   *
-   * @param {Document} document being navigated
    */
-  _onNavigation(aDocument) {
+  _onPageNavigation() {
+    if (!lazy.LoginHelper.formlessCaptureEnabled) {
+      return;
+    }
     let rootElsWeakSet =
-      lazy.LoginFormFactory.getRootElementsWeakSetForDocument(aDocument);
+      lazy.LoginFormFactory.getRootElementsWeakSetForDocument(this.document);
     let weakLoginFormRootElements =
       ChromeUtils.nondeterministicGetWeakSetKeys(rootElsWeakSet);
 
@@ -2325,15 +2285,15 @@ export class LoginManagerChild extends JSWindowActorChild {
   }
 
   /**
-   * Called by our observer when notified of a form submission.
-   * [Note that this happens before any DOM onsubmit handlers are invoked.]
+   * Called after detecting a form submission.
    * Looks for a password change in the submitted form, so we can update
    * our stored password.
    *
-   * @param {LoginForm} form
+   * @param {LoginForm} form form to be submitted
+   * @param {string} reason form submission reason
    */
   _onFormSubmit(form, reason) {
-    lazy.log("Detected form submission.");
+    lazy.log(`Handling form submission - infered by ${reason}`);
 
     this._maybeSendFormInteractionMessage(
       form,
@@ -2401,10 +2361,6 @@ export class LoginManagerChild extends JSWindowActorChild {
       targetField,
       ...docState._getFormFields(form, true, recipes, { ignoreConnect }),
     };
-
-    if (fields.usernameField) {
-      this.markAsAutoCompletableField(fields.usernameField);
-    }
 
     // It's possible the field triggering this message isn't one of those found by _getFormFields' heuristics
     if (
@@ -2481,6 +2437,10 @@ export class LoginManagerChild extends JSWindowActorChild {
       // If password saving is disabled globally, bail out now.
       if (!lazy.LoginHelper.enabled) {
         return;
+      }
+
+      if (usernameField) {
+        this.markAsAutoCompletableField(usernameField);
       }
 
       let fullyMungedPattern = /^\*+$|^•+$|^\.+$/;
@@ -2643,13 +2603,20 @@ export class LoginManagerChild extends JSWindowActorChild {
    * field is handled accordingly.
    * @param {HTMLInputElement} passwordField
    */
-  _filledWithGeneratedPassword(passwordField) {
+  filledWithGeneratedPassword(passwordField) {
     LoginFormState._highlightFilledField(passwordField);
     this._passwordEditedOrGenerated(passwordField, {
       triggeredByFillingGenerated: true,
     });
     let docState = this.stateForDocument(passwordField.ownerDocument);
     docState.fillConfirmFieldWithGeneratedPassword(passwordField);
+  }
+
+  /**
+   * Fill the relay generated username to a username field.
+   */
+  fillRelayUsername(usernameField, value) {
+    usernameField.setUserInput(value);
   }
 
   /**
@@ -3120,7 +3087,7 @@ export class LoginManagerChild extends JSWindowActorChild {
       }
 
       if (style === "generatedPassword") {
-        this._filledWithGeneratedPassword(passwordField);
+        this.filledWithGeneratedPassword(passwordField);
       }
 
       lazy.log("_fillForm succeeded");
@@ -3214,7 +3181,7 @@ export class LoginManagerChild extends JSWindowActorChild {
       // autocomplete="new-password" attribute.
       isProbablyANewPasswordField =
         autocompleteInfo.fieldName == "new-password" ||
-        this.#isProbablyANewPasswordField(input);
+        this.isProbablyANewPasswordField(input);
     }
 
     const scenarioName = lazy.FormScenarios.detect({ input }).signUpForm
@@ -3340,7 +3307,7 @@ export class LoginManagerChild extends JSWindowActorChild {
 
   #cachedNewPasswordScore = new WeakMap();
 
-  #isProbablyANewPasswordField(inputElement) {
+  isProbablyANewPasswordField(inputElement) {
     const threshold = lazy.LoginHelper.generationConfidenceThreshold;
     if (threshold == -1) {
       // Fathom is disabled

@@ -708,7 +708,7 @@ class PageStyleActor extends Actor {
       case "::marker":
         return this._nodeIsListItem(node);
       case "::backdrop":
-        return node.matches(":modal");
+        return node.matches(":modal, :popover-open");
       case "::cue":
         return node.nodeName == "VIDEO";
       case "::file-selector-button":
@@ -861,7 +861,6 @@ class PageStyleActor extends Actor {
         }
 
         const domRule = entry.rule.rawRule;
-        const desugaredSelectors = entry.rule.getDesugaredSelectors();
         const element = entry.inherited
           ? entry.inherited.rawNode
           : node.rawNode;
@@ -869,9 +868,10 @@ class PageStyleActor extends Actor {
         const { bindingElement, pseudo } =
           CssLogic.getBindingElementAndPseudo(element);
         const relevantLinkVisited = CssLogic.hasVisitedState(bindingElement);
-        entry.matchedDesugaredSelectors = [];
+        entry.matchedSelectorIndexes = [];
 
-        for (let i = 0; i < desugaredSelectors.length; i++) {
+        const len = domRule.selectorCount;
+        for (let i = 0; i < len; i++) {
           if (
             domRule.selectorMatchesElement(
               i,
@@ -880,7 +880,7 @@ class PageStyleActor extends Actor {
               relevantLinkVisited
             )
           ) {
-            entry.matchedDesugaredSelectors.push(desugaredSelectors[i]);
+            entry.matchedSelectorIndexes.push(i);
           }
         }
       }
@@ -896,13 +896,15 @@ class PageStyleActor extends Actor {
         // Traverse through all the available keyframes rule and add
         // the keyframes rule that matches the computed animation name
         for (const keyframesRule of this.cssLogic.keyframesRules) {
-          if (animationNames.indexOf(keyframesRule.name) > -1) {
-            for (const rule of keyframesRule.cssRules) {
-              entries.push({
-                rule: this._styleRef(rule),
-                keyframes: this._styleRef(keyframesRule),
-              });
-            }
+          if (!animationNames.includes(keyframesRule.name)) {
+            continue;
+          }
+
+          for (const rule of keyframesRule.cssRules) {
+            entries.push({
+              rule: this._styleRef(rule),
+              keyframes: this._styleRef(keyframesRule),
+            });
           }
         }
       }

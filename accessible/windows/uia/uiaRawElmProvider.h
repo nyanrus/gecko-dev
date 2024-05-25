@@ -11,6 +11,10 @@
 #include <stdint.h>
 #include <uiautomation.h>
 
+#include <initializer_list>
+
+#include "nsString.h"
+
 template <class T>
 class nsTArray;
 template <class T>
@@ -20,6 +24,7 @@ namespace mozilla {
 namespace a11y {
 
 class Accessible;
+enum class RelationType;
 
 /**
  * IRawElementProviderSimple implementation (maintains IAccessibleEx approach).
@@ -186,6 +191,12 @@ class uiaRawElmProvider : public IAccessibleEx,
   template <class Derived, class Interface>
   RefPtr<Interface> GetPatternFromDerived();
   bool HasSelectionItemPattern();
+  SAFEARRAY* AccRelationsToUiaArray(
+      std::initializer_list<RelationType> aTypes) const;
+  Accessible* GetLabeledBy() const;
+  long GetLandmarkType() const;
+  void GetLocalizedLandmarkType(nsAString& aLocalized) const;
+  long GetLiveSetting() const;
 };
 
 SAFEARRAY* AccessibleArrayToUiaArray(const nsTArray<Accessible*>& aAccs);

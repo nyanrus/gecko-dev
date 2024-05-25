@@ -91,11 +91,6 @@
 #  error "Not yet implemented for this platform"
 #endif  // defined(XP_WIN)
 
-#ifdef MOZ_CRASHREPORTER_INJECTOR
-#  include "InjectCrashReporter.h"
-using mozilla::InjectCrashRunnable;
-#endif
-
 #ifdef XP_WIN
 #  include <filesystem>
 #endif
@@ -293,47 +288,15 @@ static FileHandle gMagicChildCrashReportFd =
 static Mutex* dumpMapLock;
 struct ChildProcessData : public nsUint32HashKey {
   explicit ChildProcessData(KeyTypePointer aKey)
-      : nsUint32HashKey(aKey),
-        sequence(0),
-        annotations(nullptr),
-        minidumpOnly(false)
-#ifdef MOZ_CRASHREPORTER_INJECTOR
-        ,
-        callback(nullptr)
-#endif
-  {
-  }
+      : nsUint32HashKey(aKey), annotations(nullptr) {}
 
   nsCOMPtr<nsIFile> minidump;
-  // Each crashing process is assigned an increasing sequence number to
-  // indicate which process crashed first.
-  uint32_t sequence;
   UniquePtr<AnnotationTable> annotations;
-  bool minidumpOnly;  // If true then no annotations are present
-#ifdef MOZ_CRASHREPORTER_INJECTOR
-  InjectorCrashCallback* callback;
-#endif
 };
 
 typedef nsTHashtable<ChildProcessData> ChildMinidumpMap;
 static ChildMinidumpMap* pidToMinidump;
-static uint32_t crashSequence;
 static bool OOPInitialized();
-
-#ifdef MOZ_CRASHREPORTER_INJECTOR
-static nsIThread* sInjectorThread;
-
-class ReportInjectedCrash : public Runnable {
- public:
-  explicit ReportInjectedCrash(uint32_t pid)
-      : Runnable("ReportInjectedCrash"), mPID(pid) {}
-
-  NS_IMETHOD Run() override;
-
- private:
-  uint32_t mPID;
-};
-#endif  // MOZ_CRASHREPORTER_INJECTOR
 
 void RecordMainThreadId() {
   gMainThreadId =
@@ -2771,7 +2734,8 @@ static nsresult PrefSubmitReports(bool* aSubmitReports, bool writePref) {
    * toolkit/crashreporter/client/app/src/{logic,settings}.rs
    */
   nsCOMPtr<nsIFile> reporterSettings;
-  rv = NS_GetSpecialDirectory("UAppData", getter_AddRefs(reporterSettings));
+  rv = NS_GetSpecialDirectory(XRE_USER_APP_DATA_DIR,
+                              getter_AddRefs(reporterSettings));
   NS_ENSURE_SUCCESS(rv, rv);
   reporterSettings->AppendNative("Crash Reports"_ns);
   reporterSettings->AppendNative("crashreporter_settings.json"_ns);
@@ -2913,7 +2877,7 @@ void UpdateCrashEventsDir() {
     return;
   }
 
-  rv = NS_GetSpecialDirectory("UAppData", getter_AddRefs(eventsDir));
+  rv = NS_GetSpecialDirectory(XRE_USER_APP_DATA_DIR, getter_AddRefs(eventsDir));
   if (NS_SUCCEEDED(rv)) {
     SetUserAppDataDirectory(eventsDir);
     return;
@@ -2975,7 +2939,8 @@ static void FindPendingDir() {
     return;
   }
   nsCOMPtr<nsIFile> pendingDir;
-  nsresult rv = NS_GetSpecialDirectory("UAppData", getter_AddRefs(pendingDir));
+  nsresult rv =
+      NS_GetSpecialDirectory(XRE_USER_APP_DATA_DIR, getter_AddRefs(pendingDir));
   if (NS_FAILED(rv)) {
     NS_WARNING(
         "Couldn't get the user appdata directory, crash dumps will go in an "
@@ -3391,29 +3356,16 @@ static void OnChildProcessDumpRequested(
   // add an error to the minidump to highlight this fact.
 
   {
-#ifdef MOZ_CRASHREPORTER_INJECTOR
-    bool runCallback;
-#endif
-    {
-      MutexAutoLock lock(*dumpMapLock);
-      ChildProcessData* pd = pidToMinidump->PutEntry(pid);
-      MOZ_ASSERT(!pd->minidump);
-      pd->minidump = minidump;
-      pd->sequence = ++crashSequence;
-      pd->annotations = MakeUnique<AnnotationTable>();
-      AnnotationTable& annotations = *(pd->annotations);
-      AddSharedAnnotations(annotations);
-      AddChildProcessAnnotations(annotations, child_annotations);
+    MutexAutoLock lock(*dumpMapLock);
+    ChildProcessData* pd = pidToMinidump->PutEntry(pid);
+    MOZ_ASSERT(!pd->minidump);
+    pd->minidump = minidump;
+    pd->annotations = MakeUnique<AnnotationTable>();
+    AnnotationTable& annotations = *(pd->annotations);
+    AddSharedAnnotations(annotations);
+    AddChildProcessAnnotations(annotations, child_annotations);
 
-      MaybeAnnotateDumperError(aClientInfo, annotations);
-
-#ifdef MOZ_CRASHREPORTER_INJECTOR
-      runCallback = nullptr != pd->callback;
-#endif
-    }
-#ifdef MOZ_CRASHREPORTER_INJECTOR
-    if (runCallback) NS_DispatchToMainThread(new ReportInjectedCrash(pid));
-#endif
+    MaybeAnnotateDumperError(aClientInfo, annotations);
   }
 
   if (child_annotations) {
@@ -3509,13 +3461,6 @@ static void OOPDeinit() {
     return;
   }
 
-#ifdef MOZ_CRASHREPORTER_INJECTOR
-  if (sInjectorThread) {
-    sInjectorThread->Shutdown();
-    NS_RELEASE(sInjectorThread);
-  }
-#endif
-
   delete crashServer;
   crashServer = nullptr;
 
@@ -3541,59 +3486,6 @@ const char* GetChildNotificationPipe() {
   return childCrashNotifyPipe;
 }
 #endif
-
-#ifdef MOZ_CRASHREPORTER_INJECTOR
-void InjectCrashReporterIntoProcess(DWORD processID,
-                                    InjectorCrashCallback* cb) {
-  if (!GetEnabled()) return;
-
-  if (!OOPInitialized()) OOPInit();
-
-  if (!sInjectorThread) {
-    if (NS_FAILED(NS_NewNamedThread("CrashRep Inject", &sInjectorThread)))
-      return;
-  }
-
-  {
-    MutexAutoLock lock(*dumpMapLock);
-    ChildProcessData* pd = pidToMinidump->PutEntry(processID);
-    MOZ_ASSERT(!pd->minidump && !pd->callback);
-    pd->callback = cb;
-    pd->minidumpOnly = true;
-  }
-
-  nsCOMPtr<nsIRunnable> r = new InjectCrashRunnable(processID);
-  sInjectorThread->Dispatch(r, nsIEventTarget::DISPATCH_NORMAL);
-}
-
-NS_IMETHODIMP
-ReportInjectedCrash::Run() {
-  // Crash reporting may have been disabled after this method was dispatched
-  if (!OOPInitialized()) return NS_OK;
-
-  InjectorCrashCallback* cb;
-  {
-    MutexAutoLock lock(*dumpMapLock);
-    ChildProcessData* pd = pidToMinidump->GetEntry(mPID);
-    if (!pd || !pd->callback) return NS_OK;
-
-    MOZ_ASSERT(pd->minidump);
-
-    cb = pd->callback;
-  }
-
-  cb->OnCrash(mPID);
-  return NS_OK;
-}
-
-void UnregisterInjectorCallback(DWORD processID) {
-  if (!OOPInitialized()) return;
-
-  MutexAutoLock lock(*dumpMapLock);
-  pidToMinidump->RemoveEntry(processID);
-}
-
-#endif  // MOZ_CRASHREPORTER_INJECTOR
 
 #if defined(XP_LINUX)
 
@@ -3685,7 +3577,7 @@ void GetAnnotation(uint32_t childPid, Annotation annotation,
 }
 
 bool TakeMinidumpForChild(uint32_t childPid, nsIFile** dump,
-                          AnnotationTable& aAnnotations, uint32_t* aSequence) {
+                          AnnotationTable& aAnnotations) {
   if (!GetEnabled()) return false;
 
   MutexAutoLock lock(*dumpMapLock);
@@ -3694,14 +3586,7 @@ bool TakeMinidumpForChild(uint32_t childPid, nsIFile** dump,
   if (!pd) return false;
 
   NS_IF_ADDREF(*dump = pd->minidump);
-  // Only plugin process minidumps taken using the injector don't have
-  // annotations.
-  if (!pd->minidumpOnly) {
-    aAnnotations = *(pd->annotations);
-  }
-  if (aSequence) {
-    *aSequence = pd->sequence;
-  }
+  aAnnotations = *(pd->annotations);
 
   pidToMinidump->RemoveEntry(pd);
 
@@ -3743,7 +3628,7 @@ bool FinalizeOrphanedMinidump(uint32_t aChildPid, GeckoProcessType aType,
 #  pragma section("mozwerpt", read, executable, shared)
 
 __declspec(allocate("mozwerpt")) MOZ_EXPORT DWORD WINAPI
-    WerNotifyProc(LPVOID aParameter) {
+WerNotifyProc(LPVOID aParameter) {
   const WindowsErrorReportingData* werData =
       static_cast<const WindowsErrorReportingData*>(aParameter);
 
@@ -3774,7 +3659,6 @@ __declspec(allocate("mozwerpt")) MOZ_EXPORT DWORD WINAPI
     ChildProcessData* pd = pidToMinidump->PutEntry(pid);
     MOZ_ASSERT(!pd->minidump);
     pd->minidump = minidump;
-    pd->sequence = ++crashSequence;
     pd->annotations = MakeUnique<AnnotationTable>();
     (*pd->annotations)[Annotation::WindowsErrorReporting] = "1"_ns;
     AddSharedAnnotations(*(pd->annotations));
@@ -3998,39 +3882,3 @@ void SetNotificationPipeForChild(int childCrashFd) {
 #endif
 
 }  // namespace CrashReporter
-
-#if defined(__ANDROID_API__) && (__ANDROID_API__ < 24)
-
-// Bionic introduced support for getgrgid_r() and getgrnam_r() only in version
-// 24 (that is Android Nougat / 7.1.2). Since GeckoView is built by version 16
-// (32-bit) or 21 (64-bit), those functions aren't defined, but nix needs them
-// and minidump-writer relies on nix. These functions should never be called
-// in practice hence we implement them only to satisfy nix linking
-// requirements but we crash if we accidentally enter them.
-
-extern "C" {
-
-int getgrgid_r(gid_t gid, struct group* grp, char* buf, size_t buflen,
-               struct group** result) {
-  MOZ_CRASH("getgrgid_r() is not available");
-  return EPERM;
-}
-
-int getgrnam_r(const char* name, struct group* grp, char* buf, size_t buflen,
-               struct group** result) {
-  MOZ_CRASH("getgrnam_r() is not available");
-  return EPERM;
-}
-
-int mlockall(int flags) {
-  MOZ_CRASH("mlockall() is not available");
-  return EPERM;
-}
-
-int munlockall(void) {
-  MOZ_CRASH("munlockall() is not available");
-  return EPERM;
-}
-}
-
-#endif  // __ANDROID_API__ && (__ANDROID_API__ < 24)

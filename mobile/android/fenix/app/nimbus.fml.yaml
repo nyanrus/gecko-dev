@@ -53,7 +53,7 @@ features:
           {
             "top-sites": true,
             "jump-back-in": true,
-            "recently-saved": true,
+            "bookmarks": true,
             "recent-explorations": true,
             "pocket": true,
             "pocket-sponsored-stories": true,
@@ -64,7 +64,7 @@ features:
           "sections-enabled": {
             "top-sites": true,
             "jump-back-in": true,
-            "recently-saved": true,
+            "bookmarks": true,
             "recent-explorations": true,
             "pocket": true,
           }
@@ -435,6 +435,20 @@ features:
         value:
           enabled: true
 
+  remote-tab-management:
+    description: >
+      Features that let users manage tabs on other devices that are
+      connected to the same Mozilla account.
+    variables:
+      close-tabs-enabled:
+        description: >
+          Whether the feature to close synced tabs is enabled. When enabled,
+          this device will allow other devices to close tabs that are open on this device, and
+          show a "close" button for tabs that are currently open on other supported devices
+          in the synced tabs tray.
+        type: Boolean
+        default: false
+
 types:
   objects: {}
 
@@ -444,8 +458,8 @@ types:
       variants:
         top-sites:
           description: The frecency and pinned sites.
-        recently-saved:
-          description: The sites the user has bookmarked recently.
+        bookmarks:
+          description: The sites the user has bookmarked.
         jump-back-in:
           description: The tabs the user was looking immediately before being interrupted.
         recent-explorations:

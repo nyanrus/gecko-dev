@@ -308,7 +308,7 @@ export class AutoCompleteChild extends JSWindowActorChild {
 
     for (const provider of providers) {
       // Search result could be empty. However, an autocomplete provider might
-      // want to show an autoclmplete popup when there is no search result. For example,
+      // want to show an autocomplete popup when there is no search result. For example,
       // <datalist> for FormHisotry, insecure warning for LoginManager.
       const searchResult = result.find(r => r.actorName == provider.actorName);
       const acResult = provider.searchResultToAutoCompleteResult(
@@ -331,6 +331,12 @@ export class AutoCompleteChild extends JSWindowActorChild {
   stopSearch() {
     this.lastProfileAutoCompleteResult = null;
     this.#ongoingSearches.clear();
+  }
+
+  selectEntry() {
+    // we don't need to pass the selected index to the parent process because
+    // the selected index is maintained in the parent.
+    this.sendAsyncMessage("AutoComplete:SelectEntry");
   }
 }
 

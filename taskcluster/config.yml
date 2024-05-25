@@ -43,6 +43,7 @@ treeherder:
         'Btime-fenix': 'Browsertime performance tests on Fenix'
         'Btime-refbrow': 'Browsertime performance tests on the reference browser'
         'Btime-Saf': 'Browsertime performance tests on Safari'
+        'Btime-STP': 'Browsertime performance tests on Safari Technology Preview'
         'Btime-CaR': 'Browsertime performance tests on Chromium-as-Release'
         'Btime-nofis-CaR': 'Browsertime performance tests on Chromium-as-Release without fission enabled'
         'Fetch': 'Fetch and store content'
@@ -53,7 +54,7 @@ treeherder:
         'M-condprof': "Mochitests with conditioned profile"
         'M-condprof-cf': "Mochitests confirm failure with conditioned profile"
         'M-fis-hv': "Mochitests that run on Fission with isolateHighValue isolation strategy (Android-specific)"
-        'M-fis-hv-cf': "Mochitests confirm failure that run on Fission with isolateHighValue isolation strategy (Android-specific)"
+        'M-fis-hv-cf': "Mochitests confirm failure with Fission and isolateHighValue isolation strategy (Android-specific)"
         'M-headless': 'Headless Mochitests'
         'M-headless-cf': 'Headless Mochitests confirm failure'
         'M-headless-spi-nw': 'Headless Mochitests with fission and socketprocess networking.'
@@ -77,7 +78,7 @@ treeherder:
         'M-nofis': 'Mochitests without fission enabled'
         'M-nofis-cf': 'Mochitests confirm failure without fission enabled'
         'M-nofis-ship': "Mochitests without fission and with SHIP (session history in parent) enabled (Android-specific)"
-        'M-nofis-ship-cf': "Mochitests confirm failure without fission and with SHIP (session history in parent) enabled (Android-specific)"
+        'M-nofis-ship-cf': "Mochitests confirm failure: no fission + with SHIP (session history in parent) on (Android-only)"
         'M-spi': 'Mochitests with socket process'
         'M-spi-cf': 'Mochitests confirm failure with socket process'
         'M-spi-nofis': 'Mochitests with socket process without fission enabled'
@@ -118,7 +119,7 @@ treeherder:
         'R-nofis': 'Reftests without fission enabled'
         'R-nofis-cf': 'Reftests confirm failure without fission enabled'
         'R-nofis-ship': 'Reftests without fission and with SHIP (session history in parent) enabled (Android specific)'
-        'R-nofis-ship-cf': 'Reftests confirm failure without fission and with SHIP (session history in parent) enabled (Android specific)'
+        'R-nofis-ship-cf': 'Reftests confirm failure: no fission + with SHIP (session history in parent) on (Android-only)'
         'R-swr': 'Reftests with software webrender enabled'
         'R-swr-cf': 'Reftests confirm failure with software webrender enabled'
         'R-swr-nofis': 'Reftests with software webrender enabled without fission enabled'
@@ -148,6 +149,8 @@ treeherder:
         'W-cf': 'Web platform tests confirm failure'
         'W-nofis': 'Web platform tests without fission enabled'
         'W-nofis-cf': 'Web platform tests confirm failure without fission enabled'
+        'W-nofis-ship': 'Web platform tests without fission and with SHIP enabled'
+        'W-nofis-ship-cf': 'Web platform tests confirm failure without fission and with SHIP enabled'
         'W-headless': 'Headless web platform tests'
         'W-headless-cf': 'Headless web platform tests confirm failure'
         'W-swr-nofis': 'Web platform tests with software webrender enabled without fission enabled'
@@ -164,7 +167,7 @@ treeherder:
         'X-nofis': 'Xpcshell tests without fission enabled'
         'X-nofis-cf': 'Xpcshell tests confirm failure without fission enabled'
         'X-nofis-ship': 'Xpcshell tests without fission and with SHIP (session history in parent) enabled (Android specific)'
-        'X-nofis-ship-cf': 'Xpcshell tests confirm failure without fission and with SHIP (session history in parent) enabled (Android specific)'
+        'X-nofis-ship-cf': 'Xpcshell confirm failure: no fission + with SHIP (session history in parent) on (Android-only)'
         'X-spi-nw': 'Xpcshell tests with networking on socket process'
         'X-spi-nw-cf': 'Xpcshell tests confirm failure with networking on socket process'
         'X-spi-nw-nofis': 'Xpcshell tests with networking on socket process without fission enabled'
@@ -802,6 +805,22 @@ workers:
             implementation: scriptworker-pushapk
             os: scriptworker
             worker-type: '{trust-domain}-{level}-pushapk'
+        pushflatpak:
+            provisioner: scriptworker-k8s
+            implementation: push-flatpak
+            os: scriptworker
+            worker-type:
+                by-release-level:
+                    staging: '{trust-domain}-1-pushflatpak'
+                    production: '{trust-domain}-3-pushflatpak'
+        pushmsix:
+            provisioner: scriptworker-k8s
+            implementation: push-msix
+            os: scriptworker
+            worker-type:
+                by-release-level:
+                    staging: '{trust-domain}-1-pushmsix'
+                    production: '{trust-domain}-3-pushmsix'
         tree:
             provisioner: scriptworker-k8s
             implementation: treescript

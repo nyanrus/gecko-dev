@@ -11,6 +11,7 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   BrowserSearchTelemetry: "resource:///modules/BrowserSearchTelemetry.sys.mjs",
   BrowserUIUtils: "resource:///modules/BrowserUIUtils.sys.mjs",
+  BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
   ExtensionSearchHandler:
     "resource://gre/modules/ExtensionSearchHandler.sys.mjs",
   ObjectUtils: "resource://gre/modules/ObjectUtils.sys.mjs",
@@ -2518,14 +2519,10 @@ export class UrlbarInput {
   }
 
   _getSelectedValueForClipboard() {
-    let selection = this.editor.selection;
-    const flags =
-      Ci.nsIDocumentEncoder.OutputPreformatted |
-      Ci.nsIDocumentEncoder.OutputRaw;
-    let selectedVal = selection.toStringWithFormat("text/plain", flags, 0);
+    let selectedVal = this.#selectedText;
 
     // Handle multiple-range selection as a string for simplicity.
-    if (selection.rangeCount > 1) {
+    if (this.editor.selection.rangeCount > 1) {
       return selectedVal;
     }
 
@@ -3048,7 +3045,7 @@ export class UrlbarInput {
       // pressed, open in current tab to allow ctrl-enter to canonize URL.
       where = "current";
     } else {
-      where = this.window.whereToOpenLink(event, false, false);
+      where = lazy.BrowserUtils.whereToOpenLink(event, false, false);
     }
     if (lazy.UrlbarPrefs.get("openintab")) {
       if (where == "current") {
@@ -3114,7 +3111,12 @@ export class UrlbarInput {
 
     // Error check occurs during isClipboardURIValid
     uri = Services.io.newURI(copyString);
-    strippedURI = lazy.QueryStringStripper.stripForCopyOrShare(uri);
+    try {
+      strippedURI = lazy.QueryStringStripper.stripForCopyOrShare(uri);
+    } catch (e) {
+      console.warn(`stripForCopyOrShare: ${e.message}`);
+      return uri;
+    }
 
     if (strippedURI) {
       return this.makeURIReadable(strippedURI);
@@ -3176,10 +3178,26 @@ export class UrlbarInput {
       }
       selectionStart = selectionEnd += offset;
     } else {
-      // If there's a selection, we must calculate both the initial
+      // There's a selection, so we must calculate both the initial
       // protocol and the eventual trailing slash.
       if (selectionStart != 0) {
         selectionStart += offset;
+      } else {
+        // When selection starts at the beginning, the adjusted selection will
+        // include the protocol only if the selected text includes the host.
+        // The port is left out, as one may want to exclude it from the copy.
+        let prePathMinusPort;
+        try {
+          let uri = Services.io.newURI(this._untrimmedValue);
+          prePathMinusPort = [uri.userPass, uri.displayHost]
+            .filter(Boolean)
+            .join("@");
+        } catch (ex) {
+          this.logger.error("Should only try to untrim valid URLs");
+        }
+        if (!this.#selectedText.startsWith(prePathMinusPort)) {
+          selectionStart += offset;
+        }
       }
       if (selectionEnd == this.value.length) {
         offset += 1;
@@ -4274,6 +4292,15 @@ export class UrlbarInput {
    * TODO: Merge _searchModesByBrowser into this.
    */
   #browserStates = new WeakMap();
+
+  get #selectedText() {
+    return this.editor.selection.toStringWithFormat(
+      "text/plain",
+      Ci.nsIDocumentEncoder.OutputPreformatted |
+        Ci.nsIDocumentEncoder.OutputRaw,
+      0
+    );
+  }
 }
 
 /**

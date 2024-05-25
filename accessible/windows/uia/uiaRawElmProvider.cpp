@@ -22,11 +22,24 @@
 #include "MsaaRootAccessible.h"
 #include "nsAccessibilityService.h"
 #include "nsAccUtils.h"
+#include "nsIAccessiblePivot.h"
 #include "nsTextEquivUtils.h"
+#include "Pivot.h"
+#include "Relation.h"
 #include "RootAccessible.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
+
+#ifdef __MINGW32__
+// These constants are missing in mingw-w64. This code should be removed once
+// we update to a version which includes them.
+const long UIA_CustomLandmarkTypeId = 80000;
+const long UIA_FormLandmarkTypeId = 80001;
+const long UIA_MainLandmarkTypeId = 80002;
+const long UIA_NavigationLandmarkTypeId = 80003;
+const long UIA_SearchLandmarkTypeId = 80004;
+#endif  // __MINGW32__
 
 // Helper functions
 
@@ -57,6 +70,40 @@ static ExpandCollapseState ToExpandCollapseState(uint64_t aState) {
 static bool IsRadio(Accessible* aAcc) {
   role r = aAcc->Role();
   return r == roles::RADIOBUTTON || r == roles::RADIO_MENU_ITEM;
+}
+
+// Used to search for a text leaf descendant for the LabeledBy property.
+class LabelTextLeafRule : public PivotRule {
+ public:
+  virtual uint16_t Match(Accessible* aAcc) override {
+    if (aAcc->IsTextLeaf()) {
+      nsAutoString name;
+      aAcc->Name(name);
+      if (name.IsEmpty() || name.EqualsLiteral(" ")) {
+        // An empty or white space text leaf isn't useful as a label.
+        return nsIAccessibleTraversalRule::FILTER_IGNORE;
+      }
+      return nsIAccessibleTraversalRule::FILTER_MATCH;
+    }
+    if (!nsTextEquivUtils::HasNameRule(aAcc, eNameFromSubtreeIfReqRule)) {
+      // Don't descend into things that can't be used as label content; e.g.
+      // text boxes.
+      return nsIAccessibleTraversalRule::FILTER_IGNORE |
+             nsIAccessibleTraversalRule::FILTER_IGNORE_SUBTREE;
+    }
+    return nsIAccessibleTraversalRule::FILTER_IGNORE;
+  }
+};
+
+static void MaybeRaiseUiaLiveRegionEvent(Accessible* aAcc,
+                                         uint32_t aGeckoEvent) {
+  if (!::UiaClientsAreListening()) {
+    return;
+  }
+  if (Accessible* live = nsAccUtils::GetLiveRegionRoot(aAcc)) {
+    auto* uia = MsaaAccessible::GetFrom(live);
+    ::UiaRaiseAutomationEvent(uia, UIA_LiveRegionChangedEventId);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -91,6 +138,7 @@ void uiaRawElmProvider::RaiseUiaEventForGeckoEvent(Accessible* aAcc,
       return;
     case nsIAccessibleEvent::EVENT_NAME_CHANGE:
       property = UIA_NamePropertyId;
+      MaybeRaiseUiaLiveRegionEvent(aAcc, aGeckoEvent);
       break;
     case nsIAccessibleEvent::EVENT_SELECTION:
       ::UiaRaiseAutomationEvent(uia, UIA_SelectionItem_ElementSelectedEventId);
@@ -105,6 +153,10 @@ void uiaRawElmProvider::RaiseUiaEventForGeckoEvent(Accessible* aAcc,
       return;
     case nsIAccessibleEvent::EVENT_SELECTION_WITHIN:
       ::UiaRaiseAutomationEvent(uia, UIA_Selection_InvalidatedEventId);
+      return;
+    case nsIAccessibleEvent::EVENT_TEXT_INSERTED:
+    case nsIAccessibleEvent::EVENT_TEXT_REMOVED:
+      MaybeRaiseUiaLiveRegionEvent(aAcc, aGeckoEvent);
       return;
     case nsIAccessibleEvent::EVENT_TEXT_VALUE_CHANGE:
       property = UIA_ValueValuePropertyId;
@@ -445,58 +497,47 @@ uiaRawElmProvider::GetPropertyValue(PROPERTYID aPropertyId,
       break;
     }
 
-    // ARIA Role / shortcut
     case UIA_AriaRolePropertyId: {
-      nsAutoString xmlRoles;
-
-      RefPtr<AccAttributes> attributes = acc->Attributes();
-      attributes->GetAttribute(nsGkAtoms::xmlroles, xmlRoles);
-
-      if (!xmlRoles.IsEmpty()) {
+      nsAutoString role;
+      if (acc->HasARIARole()) {
+        RefPtr<AccAttributes> attributes = acc->Attributes();
+        attributes->GetAttribute(nsGkAtoms::xmlroles, role);
+      } else if (nsStaticAtom* computed = acc->ComputedARIARole()) {
+        computed->ToString(role);
+      }
+      if (!role.IsEmpty()) {
         aPropertyValue->vt = VT_BSTR;
-        aPropertyValue->bstrVal = ::SysAllocString(xmlRoles.get());
+        aPropertyValue->bstrVal = ::SysAllocString(role.get());
         return S_OK;
       }
-
       break;
     }
 
     // ARIA Properties
     case UIA_AriaPropertiesPropertyId: {
-      if (!localAcc) {
-        // XXX Implement a unified version of this. We don't cache explicit
-        // values for many ARIA attributes in RemoteAccessible; e.g. we use the
-        // checked state rather than caching aria-checked:true. Thus, a unified
-        // implementation will need to work with State(), etc.
-        break;
-      }
       nsAutoString ariaProperties;
-
-      aria::AttrIterator attribIter(localAcc->GetContent());
-      while (attribIter.Next()) {
-        nsAutoString attribName, attribValue;
-        nsAutoString value;
-        attribIter.AttrName()->ToString(attribName);
-        attribIter.AttrValue(attribValue);
-        if (StringBeginsWith(attribName, u"aria-"_ns)) {
-          // Found 'aria-'
-          attribName.ReplaceLiteral(0, 5, u"");
+      // We only expose the properties we need to expose here.
+      nsAutoString live;
+      nsAccUtils::GetLiveRegionSetting(acc, live);
+      if (!live.IsEmpty()) {
+        // This is a live region root. The live setting is already exposed via
+        // the LiveSetting property. However, there is no UIA property for
+        // atomic.
+        Maybe<bool> atomic;
+        acc->LiveRegionAttributes(nullptr, nullptr, &atomic, nullptr);
+        if (atomic && *atomic) {
+          ariaProperties.AppendLiteral("atomic=true");
+        } else {
+          // Narrator assumes a default of true, so we need to output the
+          // correct default (false) even if the attribute isn't specified.
+          ariaProperties.AppendLiteral("atomic=false");
         }
-
-        ariaProperties.Append(attribName);
-        ariaProperties.Append('=');
-        ariaProperties.Append(attribValue);
-        ariaProperties.Append(';');
       }
-
       if (!ariaProperties.IsEmpty()) {
-        // remove last delimiter:
-        ariaProperties.Truncate(ariaProperties.Length() - 1);
         aPropertyValue->vt = VT_BSTR;
         aPropertyValue->bstrVal = ::SysAllocString(ariaProperties.get());
         return S_OK;
       }
-
       break;
     }
 
@@ -522,10 +563,33 @@ uiaRawElmProvider::GetPropertyValue(PROPERTYID aPropertyId,
       break;
     }
 
+    case UIA_ControllerForPropertyId:
+      aPropertyValue->vt = VT_UNKNOWN | VT_ARRAY;
+      aPropertyValue->parray = AccRelationsToUiaArray(
+          {RelationType::CONTROLLER_FOR, RelationType::ERRORMSG});
+      return S_OK;
+
     case UIA_ControlTypePropertyId:
       aPropertyValue->vt = VT_I4;
       aPropertyValue->lVal = GetControlType();
       break;
+
+    case UIA_DescribedByPropertyId:
+      aPropertyValue->vt = VT_UNKNOWN | VT_ARRAY;
+      aPropertyValue->parray = AccRelationsToUiaArray(
+          {RelationType::DESCRIBED_BY, RelationType::DETAILS});
+      return S_OK;
+
+    case UIA_FlowsFromPropertyId:
+      aPropertyValue->vt = VT_UNKNOWN | VT_ARRAY;
+      aPropertyValue->parray =
+          AccRelationsToUiaArray({RelationType::FLOWS_FROM});
+      return S_OK;
+
+    case UIA_FlowsToPropertyId:
+      aPropertyValue->vt = VT_UNKNOWN | VT_ARRAY;
+      aPropertyValue->parray = AccRelationsToUiaArray({RelationType::FLOWS_TO});
+      return S_OK;
 
     case UIA_FrameworkIdPropertyId:
       if (ApplicationAccessible* app = ApplicationAcc()) {
@@ -578,10 +642,43 @@ uiaRawElmProvider::GetPropertyValue(PROPERTYID aPropertyId,
           (acc->State() & states::FOCUSABLE) ? VARIANT_TRUE : VARIANT_FALSE;
       return S_OK;
 
+    case UIA_LabeledByPropertyId:
+      if (Accessible* target = GetLabeledBy()) {
+        aPropertyValue->vt = VT_UNKNOWN;
+        RefPtr<IRawElementProviderSimple> uia = MsaaAccessible::GetFrom(target);
+        uia.forget(&aPropertyValue->punkVal);
+        return S_OK;
+      }
+      break;
+
+    case UIA_LandmarkTypePropertyId:
+      if (long type = GetLandmarkType()) {
+        aPropertyValue->vt = VT_I4;
+        aPropertyValue->lVal = type;
+        return S_OK;
+      }
+      break;
+
     case UIA_LevelPropertyId:
       aPropertyValue->vt = VT_I4;
       aPropertyValue->lVal = acc->GroupPosition().level;
       return S_OK;
+
+    case UIA_LiveSettingPropertyId:
+      aPropertyValue->vt = VT_I4;
+      aPropertyValue->lVal = GetLiveSetting();
+      return S_OK;
+
+    case UIA_LocalizedLandmarkTypePropertyId: {
+      nsAutoString landmark;
+      GetLocalizedLandmarkType(landmark);
+      if (!landmark.IsEmpty()) {
+        aPropertyValue->vt = VT_BSTR;
+        aPropertyValue->bstrVal = ::SysAllocString(landmark.get());
+        return S_OK;
+      }
+      break;
+    }
 
     case UIA_NamePropertyId: {
       nsAutoString name;
@@ -1136,8 +1233,8 @@ bool uiaRawElmProvider::IsControl() {
     }
   }
 
-  // Don't treat generic or text containers as controls unless they have a name
-  // or description.
+  // Don't treat generic or text containers as controls except in specific
+  // cases.
   switch (acc->Role()) {
     case roles::EMPHASIS:
     case roles::MARK:
@@ -1148,12 +1245,21 @@ bool uiaRawElmProvider::IsControl() {
     case roles::SUPERSCRIPT:
     case roles::TEXT:
     case roles::TEXT_CONTAINER: {
+      // If there is a name or a description, treat it as a control.
       if (!acc->NameIsEmpty()) {
         return true;
       }
       nsAutoString text;
       acc->Description(text);
       if (!text.IsEmpty()) {
+        return true;
+      }
+      // If this is the root of a live region, treat it as a control, since
+      // Narrator won't correctly traverse the live region's content when
+      // handling changes otherwise.
+      nsAutoString live;
+      nsAccUtils::GetLiveRegionSetting(acc, live);
+      if (!live.IsEmpty()) {
         return true;
       }
       return false;
@@ -1222,6 +1328,113 @@ bool uiaRawElmProvider::HasSelectionItemPattern() {
   // In UIA, radio buttons and radio menu items are exposed as selected or
   // unselected.
   return acc->State() & states::SELECTABLE || IsRadio(acc);
+}
+
+SAFEARRAY* uiaRawElmProvider::AccRelationsToUiaArray(
+    std::initializer_list<RelationType> aTypes) const {
+  Accessible* acc = Acc();
+  MOZ_ASSERT(acc);
+  AutoTArray<Accessible*, 10> targets;
+  for (RelationType type : aTypes) {
+    Relation rel = acc->RelationByType(type);
+    while (Accessible* target = rel.Next()) {
+      targets.AppendElement(target);
+    }
+  }
+  return AccessibleArrayToUiaArray(targets);
+}
+
+Accessible* uiaRawElmProvider::GetLabeledBy() const {
+  // Per the UIA documentation, some control types should never get a value for
+  // the LabeledBy property.
+  switch (GetControlType()) {
+    case UIA_ButtonControlTypeId:
+    case UIA_CheckBoxControlTypeId:
+    case UIA_DataItemControlTypeId:
+    case UIA_MenuControlTypeId:
+    case UIA_MenuBarControlTypeId:
+    case UIA_RadioButtonControlTypeId:
+    case UIA_ScrollBarControlTypeId:
+    case UIA_SeparatorControlTypeId:
+    case UIA_StatusBarControlTypeId:
+    case UIA_TabItemControlTypeId:
+    case UIA_TextControlTypeId:
+    case UIA_ToolBarControlTypeId:
+    case UIA_ToolTipControlTypeId:
+    case UIA_TreeItemControlTypeId:
+      return nullptr;
+  }
+
+  Accessible* acc = Acc();
+  MOZ_ASSERT(acc);
+  // Even when LabeledBy is supported, it can only return a single "static text"
+  // element.
+  Relation rel = acc->RelationByType(RelationType::LABELLED_BY);
+  LabelTextLeafRule rule;
+  while (Accessible* target = rel.Next()) {
+    // If target were a text leaf, we should return that, but that shouldn't be
+    // possible because only an element (not a text node) can be the target of a
+    // relation.
+    MOZ_ASSERT(!target->IsTextLeaf());
+    Pivot pivot(target);
+    if (Accessible* leaf = pivot.Next(target, rule)) {
+      return leaf;
+    }
+  }
+  return nullptr;
+}
+
+long uiaRawElmProvider::GetLandmarkType() const {
+  Accessible* acc = Acc();
+  MOZ_ASSERT(acc);
+  nsStaticAtom* landmark = acc->LandmarkRole();
+  if (!landmark) {
+    return 0;
+  }
+  if (landmark == nsGkAtoms::form) {
+    return UIA_FormLandmarkTypeId;
+  }
+  if (landmark == nsGkAtoms::main) {
+    return UIA_MainLandmarkTypeId;
+  }
+  if (landmark == nsGkAtoms::navigation) {
+    return UIA_NavigationLandmarkTypeId;
+  }
+  if (landmark == nsGkAtoms::search) {
+    return UIA_SearchLandmarkTypeId;
+  }
+  return UIA_CustomLandmarkTypeId;
+}
+
+void uiaRawElmProvider::GetLocalizedLandmarkType(nsAString& aLocalized) const {
+  Accessible* acc = Acc();
+  MOZ_ASSERT(acc);
+  nsStaticAtom* landmark = acc->LandmarkRole();
+  // The system provides strings for landmarks explicitly supported by the UIA
+  // LandmarkType property; i.e. form, main, navigation and search. We must
+  // provide strings for landmarks considered custom by UIA. For now, we only
+  // support landmarks in the core ARIA specification, not other ARIA modules
+  // such as DPub.
+  if (landmark == nsGkAtoms::banner || landmark == nsGkAtoms::complementary ||
+      landmark == nsGkAtoms::contentinfo || landmark == nsGkAtoms::region) {
+    nsAutoString unlocalized;
+    landmark->ToString(unlocalized);
+    Accessible::TranslateString(unlocalized, aLocalized);
+  }
+}
+
+long uiaRawElmProvider::GetLiveSetting() const {
+  Accessible* acc = Acc();
+  MOZ_ASSERT(acc);
+  nsAutoString live;
+  nsAccUtils::GetLiveRegionSetting(acc, live);
+  if (live.EqualsLiteral("polite")) {
+    return LiveSetting::Polite;
+  }
+  if (live.EqualsLiteral("assertive")) {
+    return LiveSetting::Assertive;
+  }
+  return LiveSetting::Off;
 }
 
 SAFEARRAY* a11y::AccessibleArrayToUiaArray(const nsTArray<Accessible*>& aAccs) {

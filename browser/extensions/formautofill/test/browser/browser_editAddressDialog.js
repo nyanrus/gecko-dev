@@ -1,9 +1,5 @@
 "use strict";
 
-const { FormAutofillUtils } = ChromeUtils.importESModule(
-  "resource://gre/modules/shared/FormAutofillUtils.sys.mjs"
-);
-
 const { FormAutofill } = ChromeUtils.importESModule(
   "resource://autofill/FormAutofill.sys.mjs"
 );
@@ -635,5 +631,7 @@ add_task(async function test_countrySpecificFieldsGetRequiredness() {
       "address-level1 is not rendered "
     );
     doc.querySelector("#cancel").click();
+
+    Region._setHomeRegion("US", false);
   });
 });

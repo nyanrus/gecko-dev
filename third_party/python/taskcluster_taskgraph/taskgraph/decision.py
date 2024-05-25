@@ -74,6 +74,8 @@ def taskgraph_decision(options, parameters=None):
      * generating a set of artifacts to memorialize the graph
      * calling TaskCluster APIs to create the graph
     """
+    if options.get("verbose"):
+        logging.root.setLevel(logging.DEBUG)
 
     parameters = parameters or (
         lambda graph_config: get_decision_parameters(graph_config, options)
@@ -185,6 +187,9 @@ def get_decision_parameters(graph_config, options):
 
     # Define default filter list, as most configurations shouldn't need
     # custom filters.
+    parameters["files_changed"] = repo.get_changed_files(
+        rev=parameters["head_rev"], base_rev=parameters["base_rev"]
+    )
     parameters["filters"] = [
         "target_tasks_method",
     ]

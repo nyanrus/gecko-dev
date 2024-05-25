@@ -126,6 +126,7 @@ EXPORTS.mozilla += [
     "ContentIterator.h",
     "CORSMode.h",
     "FlushType.h",
+    "FocusModel.h",
     "FullscreenChange.h",
     "GlobalTeardownObserver.h",
     "IdentifierMapEntry.h",

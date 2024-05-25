@@ -791,7 +791,6 @@
       ["button-group", "chrome://global/content/elements/named-deck.js"],
       ["findbar", "chrome://global/content/elements/findbar.js"],
       ["menulist", "chrome://global/content/elements/menulist.js"],
-      ["message-bar", "chrome://global/content/elements/message-bar.js"],
       ["named-deck", "chrome://global/content/elements/named-deck.js"],
       ["named-deck-button", "chrome://global/content/elements/named-deck.js"],
       ["panel-list", "chrome://global/content/elements/panel-list.js"],
@@ -812,6 +811,7 @@
         "chrome://global/content/elements/moz-button-group.mjs",
       ],
       ["moz-card", "chrome://global/content/elements/moz-card.mjs"],
+      ["moz-fieldset", "chrome://global/content/elements/moz-fieldset.mjs"],
       ["moz-five-star", "chrome://global/content/elements/moz-five-star.mjs"],
       [
         "moz-message-bar",

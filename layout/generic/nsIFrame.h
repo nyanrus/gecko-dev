@@ -127,6 +127,7 @@ struct CharacterDataChangeInfo;
 namespace mozilla {
 
 enum class CaretAssociationHint;
+enum class IsFocusableFlags : uint8_t;
 enum class PeekOffsetOption : uint16_t;
 enum class PseudoStyleType : uint8_t;
 enum class TableSelectionMode : uint32_t;
@@ -990,7 +991,7 @@ class nsIFrame : public nsQueryFrame {
    *     from the parent.
    *     (@see nsIFrame::Init)
    *   * a scrolled frame propagates its value to its ancestor scroll frame
-   *     (@see nsHTMLScrollFrame::ReloadChildFrames)
+   *     (@see ScrollContainerFrame::ReloadChildFrames)
    */
   mozilla::WritingMode GetWritingMode() const { return mWritingMode; }
 
@@ -1386,7 +1387,25 @@ class nsIFrame : public nsQueryFrame {
 
   bool HasUnreflowedContainerQueryAncestor() const;
 
+  // Return True if this frame has a forced break value before it.
+  //
+  // Note: this method only checks 'break-before' property on *this* frame, and
+  // it doesn't handle forced break value propagation from its first child.
+  // Callers should handle the propagation in reflow.
+  bool ShouldBreakBefore(const ReflowInput::BreakType aBreakType) const;
+
+  // Return True if this frame has a forced break value after it.
+  //
+  // Note: this method only checks 'break-after' property on *this* frame, and
+  // it doesn't handle forced break value propagation from its last child.
+  // Callers should handle the propagation in reflow.
+  bool ShouldBreakAfter(const ReflowInput::BreakType aBreakType) const;
+
  private:
+  bool ShouldBreakBetween(const nsStyleDisplay* aDisplay,
+                          const mozilla::StyleBreakBetween aBreakBetween,
+                          const ReflowInput::BreakType aBreakType) const;
+
   // The value that the CSS page-name "auto" keyword resolves to for children
   // of this frame.
   //
@@ -3293,9 +3312,9 @@ class nsIFrame : public nsQueryFrame {
 
   /**
    * Whether this frame hides its contents via the `content-visibility`
-   * property, while doing layout. This might be true when `HidesContent()` is
-   * true in the case that hidden content is being forced to lay out by position
-   * or size queries from script.
+   * property, while doing layout. This might return false when `HidesContent()`
+   * returns true in the case that hidden content is being forced to lay out
+   * by position or size queries from script.
    */
   bool HidesContentForLayout() const;
 
@@ -3500,6 +3519,12 @@ class nsIFrame : public nsQueryFrame {
    * subclasses.
    */
   bool IsImageFrameOrSubclass() const;
+
+  /**
+   * Returns true if the frame is an instance of ScrollContainerFrame or one of
+   * its subclasses.
+   */
+  bool IsScrollContainerOrSubclass() const;
 
   /**
    * Get this frame's CSS containing block.
@@ -4369,13 +4394,10 @@ class nsIFrame : public nsQueryFrame {
    * Also, depending on the pref accessibility.tabfocus some widgets may be
    * focusable but removed from the tab order. This is the default on
    * Mac OS X, where fewer items are focusable.
-   * @param  [in, optional] aWithMouse, is this focus query for mouse clicking
-   * @param  [in, optional] aCheckVisibility, whether to treat an invisible
-   *   frame as not focusable
    * @return whether the frame is focusable via mouse, kbd or script.
    */
-  [[nodiscard]] Focusable IsFocusable(bool aWithMouse = false,
-                                      bool aCheckVisibility = true);
+  [[nodiscard]] Focusable IsFocusable(
+      mozilla::IsFocusableFlags = mozilla::IsFocusableFlags(0));
 
  protected:
   // Helper for IsFocusable.
@@ -4632,14 +4654,6 @@ class nsIFrame : public nsQueryFrame {
   bool IsInSVGTextSubtree() const {
     return HasAnyStateBits(NS_FRAME_IS_SVG_TEXT);
   }
-
-  // https://drafts.csswg.org/css-overflow-3/#scroll-container
-  bool IsScrollContainer() const {
-    const bool result = IsScrollFrame() || IsListControlFrame();
-    MOZ_ASSERT(result == !!GetAsScrollContainer());
-    return result;
-  }
-  nsIScrollableFrame* GetAsScrollContainer() const;
 
   /**
    * Returns true if the frame is an SVG Rendering Observer container.

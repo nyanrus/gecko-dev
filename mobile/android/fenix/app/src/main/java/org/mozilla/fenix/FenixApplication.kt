@@ -13,6 +13,7 @@ import android.os.Build.VERSION.SDK_INT
 import android.os.StrictMode
 import android.os.SystemClock
 import android.util.Log.INFO
+import androidx.annotation.OpenForTesting
 import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.app.NotificationManagerCompat
@@ -83,7 +84,6 @@ import org.mozilla.fenix.GleanMetrics.PerfStartup
 import org.mozilla.fenix.GleanMetrics.Preferences
 import org.mozilla.fenix.GleanMetrics.SearchDefaultEngine
 import org.mozilla.fenix.GleanMetrics.ShoppingSettings
-import org.mozilla.fenix.GleanMetrics.TabStrip
 import org.mozilla.fenix.GleanMetrics.TopSites
 import org.mozilla.fenix.components.Components
 import org.mozilla.fenix.components.Core
@@ -441,6 +441,15 @@ open class FenixApplication : LocaleAwareApplication(), Provider {
             }
         }
 
+        @OptIn(DelicateCoroutinesApi::class) // GlobalScope usage
+        fun queueSuggestIngest() {
+            queue.runIfReadyOrQueue {
+                GlobalScope.launch(Dispatchers.IO) {
+                    components.fxSuggest.storage.runStartupIngestion()
+                }
+            }
+        }
+
         initQueue()
 
         // We init these items in the visual completeness queue to avoid them initing in the critical
@@ -451,6 +460,9 @@ open class FenixApplication : LocaleAwareApplication(), Provider {
         queueRestoreLocale()
         queueStorageMaintenance()
         queueNimbusFetchInForeground()
+        if (settings().enableFxSuggest) {
+            queueSuggestIngest()
+        }
     }
 
     private fun startMetricsIfEnabled() {
@@ -845,23 +857,7 @@ open class FenixApplication : LocaleAwareApplication(), Provider {
             }
         }
 
-        @OptIn(DelicateCoroutinesApi::class)
-        GlobalScope.launch(IO) {
-            try {
-                val autoFillStorage = applicationContext.components.core.autofillStorage
-                Addresses.savedAll.set(autoFillStorage.getAllAddresses().size.toLong())
-                CreditCards.savedAll.set(autoFillStorage.getAllCreditCards().size.toLong())
-            } catch (e: AutofillApiException) {
-                logger.error("Failed to fetch autofill data", e)
-            }
-
-            try {
-                val passwordsStorage = applicationContext.components.core.passwordsStorage
-                Logins.savedAll.set(passwordsStorage.list().size.toLong())
-            } catch (e: LoginsApiException) {
-                logger.error("Failed to fetch list of logins", e)
-            }
-        }
+        setAutofillMetrics()
 
         with(ShoppingSettings) {
             componentOptedOut.set(!settings.isReviewQualityCheckEnabled)
@@ -869,8 +865,6 @@ open class FenixApplication : LocaleAwareApplication(), Provider {
             userHasOnboarded.set(settings.reviewQualityCheckOptInTimeInMillis != 0L)
             disabledAds.set(!settings.isReviewQualityCheckProductRecommendationsEnabled)
         }
-
-        TabStrip.enabled.set(settings.isTabletAndTabStripEnabled)
     }
 
     @VisibleForTesting
@@ -970,6 +964,28 @@ open class FenixApplication : LocaleAwareApplication(), Provider {
     }
 
     @VisibleForTesting
+    @OpenForTesting
+    internal open fun setAutofillMetrics() {
+        @OptIn(DelicateCoroutinesApi::class)
+        GlobalScope.launch(IO) {
+            try {
+                val autoFillStorage = applicationContext.components.core.autofillStorage
+                Addresses.savedAll.set(autoFillStorage.getAllAddresses().size.toLong())
+                CreditCards.savedAll.set(autoFillStorage.getAllCreditCards().size.toLong())
+            } catch (e: AutofillApiException) {
+                logger.error("Failed to fetch autofill data", e)
+            }
+
+            try {
+                val passwordsStorage = applicationContext.components.core.passwordsStorage
+                Logins.savedAll.set(passwordsStorage.list().size.toLong())
+            } catch (e: LoginsApiException) {
+                logger.error("Failed to fetch list of logins", e)
+            }
+        }
+    }
+
+    @VisibleForTesting
     internal fun reportHomeScreenMetrics(settings: Settings) {
         reportOpeningScreenMetrics(settings)
         reportHomeScreenSectionMetrics(settings)
@@ -991,7 +1007,7 @@ open class FenixApplication : LocaleAwareApplication(), Provider {
         // We break them out here so they can be recorded when
         // `nimbus.applyPendingExperiments()` is called.
         CustomizeHome.jumpBackIn.set(settings.showRecentTabsFeature)
-        CustomizeHome.recentlySaved.set(settings.showRecentBookmarksFeature)
+        CustomizeHome.bookmarks.set(settings.showBookmarksHomeFeature)
         CustomizeHome.mostVisitedSites.set(settings.showTopSitesFeature)
         CustomizeHome.recentlyVisited.set(settings.historyMetadataUIFeature)
         CustomizeHome.pocket.set(settings.showPocketRecommendationsFeature)

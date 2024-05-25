@@ -12,6 +12,9 @@ const { JsonSchemaValidator } = ChromeUtils.importESModule(
 const { UIState } = ChromeUtils.importESModule(
   "resource://services-sync/UIState.sys.mjs"
 );
+const { ClientID } = ChromeUtils.importESModule(
+  "resource://gre/modules/ClientID.sys.mjs"
+);
 
 add_setup(function () {
   // Much of this setup is copied from toolkit/profile/xpcshell/head.js. It is
@@ -77,6 +80,8 @@ add_setup(function () {
  * @returns {Promise<undefined>}
  */
 async function testCreateBackupHelper(sandbox, taskFn) {
+  const EXPECTED_CLIENT_ID = await ClientID.getClientID();
+
   let fake1ManifestEntry = { fake1: "hello from 1" };
   sandbox
     .stub(FakeBackupResource1.prototype, "backup")
@@ -109,19 +114,35 @@ async function testCreateBackupHelper(sandbox, taskFn) {
   let backupsFolderPath = PathUtils.join(fakeProfilePath, "backups");
   let stagingPath = PathUtils.join(backupsFolderPath, "staging");
 
-  // For now, we expect a single backup only to be saved.
-  let backups = await IOUtils.getChildren(backupsFolderPath);
+  // For now, we expect a single backup only to be saved. There should also be
+  // a single compressed file for the staging folder.
+  let backupsChildren = await IOUtils.getChildren(backupsFolderPath);
   Assert.equal(
-    backups.length,
-    1,
-    "There should only be 1 backup in the backups folder"
+    backupsChildren.length,
+    2,
+    "There should only be 2 items in the backups folder"
   );
 
-  let renamedFilename = await PathUtils.filename(backups[0]);
+  // The folder and the compressed file should have the same filename, but
+  // the compressed file should have a `.zip` file extension. We sort the
+  // list of directory children to make sure that the folder is first in
+  // the array.
+  backupsChildren.sort();
+
+  let renamedFilename = await PathUtils.filename(backupsChildren[0]);
   let expectedFormatRegex = /^\d{4}(-\d{2}){2}T(\d{2}-){2}\d{2}Z$/;
   Assert.ok(
     renamedFilename.match(expectedFormatRegex),
     "Renamed staging folder should have format YYYY-MM-DDTHH-mm-ssZ"
+  );
+
+  // We also expect a zipped version of that same folder to exist in the
+  // directory, with the same name along with a .zip extension.
+  let archiveFilename = await PathUtils.filename(backupsChildren[1]);
+  Assert.equal(
+    archiveFilename,
+    `${renamedFilename}.zip`,
+    "Compressed staging folder exists."
   );
 
   let stagingPathRenamed = PathUtils.join(backupsFolderPath, renamedFilename);
@@ -189,6 +210,11 @@ async function testCreateBackupHelper(sandbox, taskFn) {
     manifest.resources.fake3,
     fake3ManifestEntry,
     "Manifest contains the expected entry for FakeBackupResource3"
+  );
+  Assert.equal(
+    manifest.meta.legacyClientID,
+    EXPECTED_CLIENT_ID,
+    "The client ID was stored properly."
   );
 
   taskFn(manifest);
@@ -311,6 +337,14 @@ add_task(async function test_recoverFromBackup() {
 
   let { stagingPath } = await bs.createBackup({ profilePath: oldProfilePath });
 
+  let testTelemetryStateObject = {
+    clientID: "ed209123-04a1-04a1-04a1-c0ffeec0ffee",
+  };
+  await IOUtils.writeJSON(
+    PathUtils.join(PathUtils.profileDir, "datareporting", "state.json"),
+    testTelemetryStateObject
+  );
+
   let profile = await bs.recoverFromBackup(
     stagingPath,
     false /* shouldLaunch */,
@@ -353,6 +387,16 @@ add_task(async function test_recoverFromBackup() {
     );
   }
 
+  let newProfileTelemetryStateObject = await IOUtils.readJSON(
+    PathUtils.join(newProfileRootPath, "datareporting", "state.json")
+  );
+  Assert.deepEqual(
+    testTelemetryStateObject,
+    newProfileTelemetryStateObject,
+    "Recovered profile inherited telemetry state from the profile that " +
+      "initiated recovery"
+  );
+
   await IOUtils.remove(oldProfilePath, { recursive: true });
   await IOUtils.remove(newProfileRootPath, { recursive: true });
   sandbox.restore();
@@ -391,6 +435,7 @@ add_task(async function test_checkForPostRecovery() {
   });
 
   await bs.checkForPostRecovery(testProfilePath);
+  await bs.postRecoveryComplete;
 
   Assert.ok(
     FakeBackupResource1.prototype.postRecovery.calledOnce,

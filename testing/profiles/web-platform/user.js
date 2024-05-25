@@ -94,3 +94,8 @@ user_pref("security.webauthn.enable_conditional_mediation", true);
 user_pref("network.captive-portal-service.enabled", false);
 // Enable http2 websockets support
 user_pref("network.http.http2.websockets", true);
+// Turn off update
+user_pref("app.update.disabledForTesting", true);
+// Enable setPermission API in Marionette.
+// This preference will be removed with a fix on bug 1897180.
+user_pref("marionette.setpermission.enabled", true);

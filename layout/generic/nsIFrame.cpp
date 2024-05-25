@@ -19,6 +19,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/DisplayPortUtils.h"
 #include "mozilla/EventForwards.h"
+#include "mozilla/FocusModel.h"
 #include "mozilla/dom/CSSAnimation.h"
 #include "mozilla/dom/CSSTransition.h"
 #include "mozilla/dom/ContentVisibilityAutoStateChangeEvent.h"
@@ -35,6 +36,7 @@
 #include "mozilla/PresShell.h"
 #include "mozilla/PresShellInlines.h"
 #include "mozilla/ResultExtensions.h"
+#include "mozilla/ScrollContainerFrame.h"
 #include "mozilla/SelectionMovementUtils.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/StaticAnalysisFunctions.h"
@@ -84,7 +86,6 @@
 #include "nsFrameSelection.h"
 #include "nsGkAtoms.h"
 #include "nsGridContainerFrame.h"
-#include "nsGfxScrollFrame.h"
 #include "nsCSSAnonBoxes.h"
 #include "nsCanvasFrame.h"
 
@@ -1758,7 +1759,7 @@ bool nsIFrame::Extend3DContext(const nsStyleDisplay* aStyleDisplay,
 
   // If we're all scroll frame, then all descendants will be clipped, so we
   // can't preserve 3d.
-  if (IsScrollFrame()) {
+  if (IsScrollContainerFrame()) {
     return false;
   }
 
@@ -3218,8 +3219,8 @@ void nsIFrame::BuildDisplayListForStackingContext(
   AutoSaveRestoreContainsBlendMode autoRestoreBlendMode(*aBuilder);
   aBuilder->SetContainsBlendMode(false);
 
-  // NOTE: When changing this condition make sure to tweak nsGfxScrollFrame as
-  // well.
+  // NOTE: When changing this condition make sure to tweak ScrollContainerFrame
+  // as well.
   bool usingBackdropFilter = effects->HasBackdropFilters() &&
                              IsVisibleForPainting() &&
                              !style.IsRootElementStyle();
@@ -7891,7 +7892,7 @@ nsRect nsIFrame::GetNormalRect() const {
 nsRect nsIFrame::GetBoundingClientRect() {
   return nsLayoutUtils::GetAllInFlowRectsUnion(
       this, nsLayoutUtils::GetContainingBlockForClientRect(this),
-      nsLayoutUtils::RECTS_ACCOUNT_FOR_TRANSFORMS);
+      nsLayoutUtils::GetAllInFlowRectsFlag::AccountForTransforms);
 }
 
 nsPoint nsIFrame::GetPositionIgnoringScrolling() const {
@@ -8041,7 +8042,7 @@ bool nsIFrame::ComputeCustomOverflow(OverflowAreas& aOverflowAreas) {
 }
 
 bool nsIFrame::DoesClipChildrenInBothAxes() const {
-  if (IsScrollContainer()) {
+  if (IsScrollContainerOrSubclass()) {
     return true;
   }
   const nsStyleDisplay* display = StyleDisplay();
@@ -8148,6 +8149,13 @@ bool nsIFrame::IsBlockFrameOrSubclass() const {
 bool nsIFrame::IsImageFrameOrSubclass() const {
   const nsImageFrame* asImage = do_QueryFrame(this);
   return !!asImage;
+}
+
+bool nsIFrame::IsScrollContainerOrSubclass() const {
+  const bool result = IsScrollContainerFrame() || IsListControlFrame();
+  MOZ_ASSERT(result ==
+             !!static_cast<const ScrollContainerFrame*>(do_QueryFrame(this)));
+  return result;
 }
 
 bool nsIFrame::IsSubgrid() const {
@@ -9588,7 +9596,7 @@ std::pair<nsIFrame*, nsIFrame*> nsIFrame::GetContainingBlockForLine(
     }
     parentFrame = frame->GetParent();
     if (parentFrame) {
-      if (aLockScroll && parentFrame->IsScrollFrame()) {
+      if (aLockScroll && parentFrame->IsScrollContainerFrame()) {
         return std::pair(nullptr, nullptr);
       }
       if (parentFrame->CanProvideLineIterator()) {
@@ -9999,7 +10007,7 @@ static nsRect ComputeOutlineInnerRect(
   }
   const nsStyleDisplay* disp = aFrame->StyleDisplay();
   LayoutFrameType fType = aFrame->Type();
-  if (fType == LayoutFrameType::Scroll ||
+  if (fType == LayoutFrameType::ScrollContainer ||
       fType == LayoutFrameType::ListControl ||
       fType == LayoutFrameType::SVGOuterSVG) {
     return u;
@@ -10019,9 +10027,8 @@ static nsRect ComputeOutlineInnerRect(
   // Iterate over all children except pop-up, absolutely-positioned,
   // float, and overflow ones.
   const FrameChildListIDs skip = {
-      FrameChildListID::Popup, FrameChildListID::Absolute,
-      FrameChildListID::Fixed, FrameChildListID::Float,
-      FrameChildListID::Overflow};
+      FrameChildListID::Absolute, FrameChildListID::Fixed,
+      FrameChildListID::Float, FrameChildListID::Overflow};
   for (const auto& [list, listID] : aFrame->ChildLists()) {
     if (skip.contains(listID)) {
       continue;
@@ -10764,7 +10771,7 @@ void nsIFrame::GetFirstLeaf(nsIFrame** aFrame) {
 }
 
 bool nsIFrame::IsFocusableDueToScrollFrame() {
-  if (!IsScrollFrame()) {
+  if (!IsScrollContainerFrame()) {
     if (nsFieldSetFrame* fieldset = do_QueryFrame(this)) {
       // TODO: Do we have similar special-cases like this where we can have
       // anonymous scrollable boxes hanging off a primary frame?
@@ -10808,7 +10815,7 @@ bool nsIFrame::IsFocusableDueToScrollFrame() {
   return true;
 }
 
-Focusable nsIFrame::IsFocusable(bool aWithMouse, bool aCheckVisibility) {
+Focusable nsIFrame::IsFocusable(IsFocusableFlags aFlags) {
   // cannot focus content in print preview mode. Only the root can be focused,
   // but that's handled elsewhere.
   if (PresContext()->Type() == nsPresContext::eContext_PrintPreview) {
@@ -10819,7 +10826,8 @@ Focusable nsIFrame::IsFocusable(bool aWithMouse, bool aCheckVisibility) {
     return {};
   }
 
-  if (aCheckVisibility && !IsVisibleConsideringAncestors()) {
+  if (!(aFlags & IsFocusableFlags::IgnoreVisibility) &&
+      !IsVisibleConsideringAncestors()) {
     return {};
   }
 
@@ -10839,14 +10847,14 @@ Focusable nsIFrame::IsFocusable(bool aWithMouse, bool aCheckVisibility) {
     // As a legacy special-case, -moz-user-focus controls focusability and
     // tabability of XUL elements in some circumstances (which default to
     // -moz-user-focus: ignore).
-    auto focusability = xul->GetXULFocusability(aWithMouse);
+    auto focusability = xul->GetXULFocusability(aFlags);
     focusable.mFocusable =
         focusability.mForcedFocusable.valueOr(uf == StyleUserFocus::Normal);
     if (focusable) {
       focusable.mTabIndex = focusability.mForcedTabIndexIfFocusable.valueOr(0);
     }
   } else {
-    focusable = mContent->IsFocusableWithoutStyle(aWithMouse);
+    focusable = mContent->IsFocusableWithoutStyle(aFlags);
   }
 
   if (focusable) {
@@ -10854,7 +10862,8 @@ Focusable nsIFrame::IsFocusable(bool aWithMouse, bool aCheckVisibility) {
   }
 
   // If we're focusing with the mouse we never focus scroll areas.
-  if (!aWithMouse && IsFocusableDueToScrollFrame()) {
+  if (!(aFlags & IsFocusableFlags::WithMouse) &&
+      IsFocusableDueToScrollFrame()) {
     return {true, 0};
   }
 
@@ -11519,10 +11528,6 @@ static bool HasNoVisibleDescendants(const nsIFrame* aFrame) {
   return true;
 }
 
-nsIScrollableFrame* nsIFrame::GetAsScrollContainer() const {
-  return do_QueryFrame(this);
-}
-
 void nsIFrame::UpdateVisibleDescendantsState() {
   if (StyleVisibility()->IsVisible()) {
     // Notify invisible ancestors that a visible descendant exists now.
@@ -11546,7 +11551,7 @@ nsIFrame::PhysicalAxes nsIFrame::ShouldApplyOverflowClipping(
   // the scrollable frame will already clip overflowing content, and because
   // 'contain:paint' should prevent all means of escaping that clipping
   // (e.g. because it forms a fixed-pos containing block).
-  if (aDisp->IsContainPaint() && !IsScrollFrame() &&
+  if (aDisp->IsContainPaint() && !IsScrollContainerFrame() &&
       SupportsContainLayoutAndPaint()) {
     return PhysicalAxes::Both;
   }
@@ -11576,7 +11581,7 @@ nsIFrame::PhysicalAxes nsIFrame::ShouldApplyOverflowClipping(
   }
 
   // clip overflow:clip, except for nsListControlFrame which is
-  // an nsHTMLScrollFrame sub-class.
+  // a ScrollContainerFrame sub-class.
   if (MOZ_UNLIKELY((aDisp->mOverflowX == mozilla::StyleOverflow::Clip ||
                     aDisp->mOverflowY == mozilla::StyleOverflow::Clip) &&
                    !IsListControlFrame())) {
@@ -11638,6 +11643,47 @@ bool nsIFrame::HasUnreflowedContainerQueryAncestor() const {
   }
   // No query container from this frame up to root.
   return false;
+}
+
+bool nsIFrame::ShouldBreakBefore(
+    const ReflowInput::BreakType aBreakType) const {
+  const auto* display = StyleDisplay();
+  return ShouldBreakBetween(display, display->mBreakBefore, aBreakType);
+}
+
+bool nsIFrame::ShouldBreakAfter(const ReflowInput::BreakType aBreakType) const {
+  const auto* display = StyleDisplay();
+  return ShouldBreakBetween(display, display->mBreakAfter, aBreakType);
+}
+
+bool nsIFrame::ShouldBreakBetween(
+    const nsStyleDisplay* aDisplay, const StyleBreakBetween aBreakBetween,
+    const ReflowInput::BreakType aBreakType) const {
+  const bool shouldBreakBetween = [&] {
+    switch (aBreakBetween) {
+      case StyleBreakBetween::Always:
+        return true;
+      case StyleBreakBetween::Auto:
+      case StyleBreakBetween::Avoid:
+        return false;
+      case StyleBreakBetween::Page:
+      case StyleBreakBetween::Left:
+      case StyleBreakBetween::Right:
+        return aBreakType == ReflowInput::BreakType::Page;
+    }
+    MOZ_ASSERT_UNREACHABLE("Unknown break-between value!");
+    return false;
+  }();
+
+  if (!shouldBreakBetween) {
+    return false;
+  }
+  if (IsAbsolutelyPositioned(aDisplay)) {
+    // 'break-before' and 'break-after' properties does not apply to
+    // absolutely-positioned boxes.
+    return false;
+  }
+  return true;
 }
 
 #ifdef DEBUG

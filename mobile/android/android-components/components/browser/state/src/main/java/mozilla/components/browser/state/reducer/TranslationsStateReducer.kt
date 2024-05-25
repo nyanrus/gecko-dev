@@ -9,6 +9,9 @@ import mozilla.components.browser.state.selector.findTab
 import mozilla.components.browser.state.state.BrowserState
 import mozilla.components.browser.state.state.SessionState
 import mozilla.components.browser.state.state.TranslationsState
+import mozilla.components.concept.engine.translate.LanguageModel
+import mozilla.components.concept.engine.translate.ModelOperation
+import mozilla.components.concept.engine.translate.ModelState
 import mozilla.components.concept.engine.translate.TranslationError
 import mozilla.components.concept.engine.translate.TranslationOperation
 import mozilla.components.concept.engine.translate.TranslationPageSettingOperation
@@ -62,11 +65,8 @@ internal object TranslationsStateReducer {
             }
 
             // Checking for if the translations engine is in the fully translated state or not based
-            // on the values of the translation pair.
-            if (action.translationEngineState.requestedTranslationPair == null ||
-                action.translationEngineState.requestedTranslationPair?.fromLanguage == null ||
-                action.translationEngineState.requestedTranslationPair?.toLanguage == null
-            ) {
+            // on if a visual change has occurred on the browser.
+            if (action.translationEngineState.hasVisibleChange != true) {
                 // In an untranslated state
                 var translationsError: TranslationError? = null
                 if (action.translationEngineState.detectedLanguages?.supportedDocumentLang == false) {
@@ -111,9 +111,9 @@ internal object TranslationsStateReducer {
         is TranslationsAction.TranslateSuccessAction -> {
             when (action.operation) {
                 TranslationOperation.TRANSLATE -> {
+                    // The isTranslated state will be identified on a translation state change.
                     state.copyWithTranslationsState(action.tabId) {
                         it.copy(
-                            isTranslated = true,
                             isTranslateProcessing = false,
                             translationError = null,
                         )
@@ -426,6 +426,19 @@ internal object TranslationsStateReducer {
             }
         }
 
+        is TranslationsAction.UpdateLanguageSettingsAction -> {
+            val languageSettings = state.translationEngine.languageSettings?.toMutableMap()
+            // Only set when keys are present.
+            if (languageSettings?.get(action.languageCode) != null) {
+                languageSettings[action.languageCode] = action.setting
+            }
+            state.copy(
+                translationEngine = state.translationEngine.copy(
+                    languageSettings = languageSettings,
+                ),
+            )
+        }
+
         is TranslationsAction.SetGlobalOfferTranslateSettingAction -> {
             state.copy(
                 translationEngine = state.translationEngine.copy(
@@ -472,6 +485,24 @@ internal object TranslationsStateReducer {
                 translationEngine = state.translationEngine.copy(
                     languageSettings = action.languageSettings,
                     engineError = null,
+                ),
+            )
+        }
+
+        is TranslationsAction.ManageLanguageModelsAction -> {
+            val processState = if (action.options.operation == ModelOperation.DOWNLOAD) {
+                ModelState.DOWNLOAD_IN_PROGRESS
+            } else {
+                ModelState.DELETION_IN_PROGRESS
+            }
+            val newModelState = LanguageModel.determineNewLanguageModelState(
+                currentLanguageModels = state.translationEngine.languageModels,
+                options = action.options,
+                newStatus = processState,
+            )
+            state.copy(
+                translationEngine = state.translationEngine.copy(
+                    languageModels = newModelState,
                 ),
             )
         }

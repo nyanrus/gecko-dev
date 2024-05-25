@@ -32,6 +32,7 @@ import org.mozilla.fenix.helpers.Constants.LONG_CLICK_DURATION
 import org.mozilla.fenix.helpers.Constants.RETRY_COUNT
 import org.mozilla.fenix.helpers.Constants.TAG
 import org.mozilla.fenix.helpers.DataGenerationHelper.getStringResource
+import org.mozilla.fenix.helpers.HomeActivityComposeTestRule
 import org.mozilla.fenix.helpers.MatcherHelper.assertUIObjectExists
 import org.mozilla.fenix.helpers.MatcherHelper.checkedItemWithResIdAndText
 import org.mozilla.fenix.helpers.MatcherHelper.itemContainingText
@@ -162,23 +163,25 @@ class ThreeDotMenuMainRobot {
         assertUIObjectExists(
             normalBrowsingNewTabButton(),
             bookmarksButton(),
+            addBookmarkButton(),
             historyButton(),
             downloadsButton(),
+            passwordsButton(),
             addOnsButton(),
             syncAndSaveDataButton(),
             findInPageButton(),
+            translateButton(),
             desktopSiteButton(),
             reportSiteIssueButton(),
-            addToHomeScreenButton(),
-            addToShortcutsButton(),
-            saveToCollectionButton(),
-            addBookmarkButton(),
             desktopSiteToggle(isRequestDesktopSiteEnabled),
-            translateButton(),
+
         )
         // Swipe to second part of menu
         expandMenu()
         assertUIObjectExists(
+            addToHomeScreenButton(),
+            addToShortcutsButton(),
+            saveToCollectionButton(),
             settingsButton(),
         )
         if (FxNimbus.features.print.value().browserPrintEnabled) {
@@ -197,6 +200,7 @@ class ThreeDotMenuMainRobot {
             bookmarksButton(),
             historyButton(),
             downloadsButton(),
+            passwordsButton(),
             addOnsButton(),
             // Disabled step due to https://github.com/mozilla-mobile/fenix/issues/26788
             // syncAndSaveDataButton,
@@ -272,7 +276,7 @@ class ThreeDotMenuMainRobot {
             return SettingsRobot.Transition()
         }
 
-        fun openDownloadsManager(interact: DownloadRobot.() -> Unit): DownloadRobot.Transition {
+        fun openDownloadsManager(composeTestRule: HomeActivityComposeTestRule, interact: ComposeDownloadRobot.() -> Unit): DownloadRobot.Transition {
             Log.i(TAG, "openDownloadsManager: Trying to perform swipe down action on the three dot menu")
             threeDotMenuRecyclerView().perform(swipeDown())
             Log.i(TAG, "openDownloadsManager: Performed swipe down action on the three dot menu")
@@ -280,7 +284,7 @@ class ThreeDotMenuMainRobot {
             downloadsButton().click()
             Log.i(TAG, "openDownloadsManager: Clicked the \"DOWNLOADS\" button")
 
-            DownloadRobot().interact()
+            ComposeDownloadRobot(composeTestRule).interact()
             return DownloadRobot.Transition()
         }
 
@@ -717,6 +721,8 @@ private fun historyButton() =
     itemContainingText(getStringResource(R.string.library_history))
 private fun downloadsButton() =
     itemContainingText(getStringResource(R.string.library_downloads))
+private fun passwordsButton() =
+    itemContainingText(getStringResource(R.string.browser_menu_passwords))
 private fun addOnsButton() =
     itemContainingText(getStringResource(R.string.browser_menu_extensions))
 private fun desktopSiteButton() =

@@ -6,7 +6,6 @@
 
 #include "nsCocoaWindow.h"
 
-#include "AppearanceOverride.h"
 #include "NativeKeyBindings.h"
 #include "ScreenHelperCocoa.h"
 #include "TextInputHandler.h"
@@ -157,6 +156,13 @@ void nsCocoaWindow::DestroyNativeWindow() {
   // for us to finish a native transition that will have no listener once
   // we clear our delegate.
   EndOurNativeTransition();
+
+  // We are about to destroy mWindow. Before we do that, make sure that we
+  // hide the window using the Show() method, because it has several side
+  // effects that our parent and listeners might be expecting. If we don't
+  // do this now, then these side effects will never execute, though the
+  // window will definitely no longer be shown.
+  Show(false);
 
   [mWindow releaseJSObjects];
   // We want to unhook the delegate here because we don't want events
@@ -524,10 +530,6 @@ nsresult nsCocoaWindow::CreateNativeWindow(const NSRect& aRect,
 
   [WindowDataMap.sharedWindowDataMap ensureDataForWindow:mWindow];
   mWindowMadeHere = true;
-
-  // Make the window respect the global appearance, which follows the
-  // browser.theme.toolbar-theme pref.
-  mWindow.appearanceSource = MOZGlobalAppearance.sharedInstance;
 
   return NS_OK;
 
@@ -1969,7 +1971,6 @@ void nsCocoaWindow::BackingScaleFactorChanged() {
   if (PresShell* presShell = mWidgetListener->GetPresShell()) {
     presShell->BackingScaleFactorChanged();
   }
-  mWidgetListener->UIResolutionChanged();
 }
 
 int32_t nsCocoaWindow::RoundsWidgetCoordinatesTo() {
@@ -2327,9 +2328,11 @@ void nsCocoaWindow::SetColorScheme(const Maybe<ColorScheme>& aScheme) {
   if (!mWindow) {
     return;
   }
-
-  mWindow.appearance = aScheme ? NSAppearanceForColorScheme(*aScheme) : nil;
-
+  NSAppearance* appearance =
+      aScheme ? NSAppearanceForColorScheme(*aScheme) : nil;
+  if (mWindow.appearance != appearance) {
+    mWindow.appearance = appearance;
+  }
   NS_OBJC_END_TRY_IGNORE_BLOCK;
 }
 

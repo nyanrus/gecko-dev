@@ -12,6 +12,7 @@ import { CustomizeMenu } from "content-src/components/CustomizeMenu/CustomizeMen
 import React from "react";
 import { Search } from "content-src/components/Search/Search";
 import { Sections } from "content-src/components/Sections/Sections";
+import { Weather } from "content-src/components/Weather/Weather";
 
 const VISIBLE = "visible";
 const VISIBILITY_CHANGE_EVENT = "visibilitychange";
@@ -111,7 +112,13 @@ export class BaseContent extends React.PureComponent {
     this.onWindowScroll = debounce(this.onWindowScroll.bind(this), 5);
     this.setPref = this.setPref.bind(this);
     this.updateWallpaper = this.updateWallpaper.bind(this);
-    this.state = { fixedSearch: false, firstVisibleTimestamp: null };
+    this.prefersDarkQuery = null;
+    this.handleColorModeChange = this.handleColorModeChange.bind(this);
+    this.state = {
+      fixedSearch: false,
+      firstVisibleTimestamp: null,
+      colorMode: "",
+    };
   }
 
   setFirstVisibleTimestamp() {
@@ -143,9 +150,28 @@ export class BaseContent extends React.PureComponent {
         this._onVisibilityChange
       );
     }
+    // track change event to dark/light mode
+    this.prefersDarkQuery = globalThis.matchMedia(
+      "(prefers-color-scheme: dark)"
+    );
+
+    this.prefersDarkQuery.addEventListener(
+      "change",
+      this.handleColorModeChange
+    );
+    this.handleColorModeChange();
+  }
+
+  handleColorModeChange() {
+    const colorMode = this.prefersDarkQuery?.matches ? "dark" : "light";
+    this.setState({ colorMode });
   }
 
   componentWillUnmount() {
+    this.prefersDarkQuery?.removeEventListener(
+      "change",
+      this.handleColorModeChange
+    );
     global.removeEventListener("scroll", this.onWindowScroll);
     global.removeEventListener("keydown", this.handleOnKeyDown);
     if (this._onVisibilityChange) {
@@ -194,9 +220,11 @@ export class BaseContent extends React.PureComponent {
   }
 
   renderWallpaperAttribution() {
-    const activeWallpaper =
-      this.props.Prefs.values["newtabWallpapers.wallpaper"];
     const { wallpaperList } = this.props.Wallpapers;
+    const activeWallpaper =
+      this.props.Prefs.values[
+        `newtabWallpapers.wallpaper-${this.state.colorMode}`
+      ];
     const selected = wallpaperList.find(wp => wp.title === activeWallpaper);
     // make sure a wallpaper is selected and that the attribution also exists
     if (!selected?.attribution) {
@@ -208,7 +236,7 @@ export class BaseContent extends React.PureComponent {
       return (
         <p
           className={`wallpaper-attribution`}
-          key={name}
+          key={name.string}
           data-l10n-id="newtab-wallpaper-attribution"
           data-l10n-args={JSON.stringify({
             author_string: name.string,
@@ -231,15 +259,35 @@ export class BaseContent extends React.PureComponent {
 
   async updateWallpaper() {
     const prefs = this.props.Prefs.values;
-    const activeWallpaper = prefs["newtabWallpapers.wallpaper"];
     const { wallpaperList } = this.props.Wallpapers;
+
     if (wallpaperList) {
-      const wallpaper =
-        wallpaperList.find(wp => wp.title === activeWallpaper) || "";
+      const lightWallpaper =
+        wallpaperList.find(
+          wp => wp.title === prefs["newtabWallpapers.wallpaper-light"]
+        ) || "";
+      const darkWallpaper =
+        wallpaperList.find(
+          wp => wp.title === prefs["newtabWallpapers.wallpaper-dark"]
+        ) || "";
       global.document?.body.style.setProperty(
-        "--newtab-wallpaper",
-        `url(${wallpaper?.wallpaperUrl || ""})`
+        `--newtab-wallpaper-light`,
+        `url(${lightWallpaper?.wallpaperUrl || ""})`
       );
+
+      global.document?.body.style.setProperty(
+        `--newtab-wallpaper-dark`,
+        `url(${darkWallpaper?.wallpaperUrl || ""})`
+      );
+
+      // Add helper class to body if user has a wallpaper selected
+      if (lightWallpaper) {
+        global.document?.body.classList.add("hasWallpaperLight");
+      }
+
+      if (darkWallpaper) {
+        global.document?.body.classList.add("hasWallpaperDark");
+      }
     }
   }
 
@@ -248,8 +296,11 @@ export class BaseContent extends React.PureComponent {
     const { App } = props;
     const { initialized, customizeMenuVisible } = App;
     const prefs = props.Prefs.values;
-    const activeWallpaper = prefs["newtabWallpapers.wallpaper"];
+
+    const activeWallpaper =
+      prefs[`newtabWallpapers.wallpaper-${this.state.colorMode}`];
     const wallpapersEnabled = prefs["newtabWallpapers.enabled"];
+    const weatherEnabled = prefs.showWeather;
 
     const { pocketConfig } = prefs;
 
@@ -282,10 +333,12 @@ export class BaseContent extends React.PureComponent {
       showSponsoredPocketEnabled: prefs.showSponsored,
       showRecentSavesEnabled: prefs.showRecentSaves,
       topSitesRowsCount: prefs.topSitesRows,
+      weatherEnabled: prefs.showWeather,
     };
 
     const pocketRegion = prefs["feeds.system.topstories"];
     const mayHaveSponsoredStories = prefs["system.showSponsored"];
+    const mayHaveWeather = prefs["system.showWeather"];
     const { mayHaveSponsoredTopSites } = prefs;
 
     const outerClassName = [
@@ -318,6 +371,7 @@ export class BaseContent extends React.PureComponent {
           pocketRegion={pocketRegion}
           mayHaveSponsoredTopSites={mayHaveSponsoredTopSites}
           mayHaveSponsoredStories={mayHaveSponsoredStories}
+          mayHaveWeather={mayHaveWeather}
           spocMessageVariant={spocMessageVariant}
           showing={customizeMenuVisible}
         />
@@ -353,6 +407,13 @@ export class BaseContent extends React.PureComponent {
             <ConfirmDialog />
             {wallpapersEnabled && this.renderWallpaperAttribution()}
           </main>
+          <aside>
+            {weatherEnabled && (
+              <ErrorBoundary>
+                <Weather />
+              </ErrorBoundary>
+            )}
+          </aside>
         </div>
       </div>
     );
@@ -370,4 +431,5 @@ export const Base = connect(state => ({
   DiscoveryStream: state.DiscoveryStream,
   Search: state.Search,
   Wallpapers: state.Wallpapers,
+  Weather: state.Weather,
 }))(_Base);

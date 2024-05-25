@@ -15,7 +15,11 @@ import mozilla.components.browser.state.state.SessionState
 import mozilla.components.concept.engine.Engine
 import mozilla.components.concept.engine.EngineSession
 import mozilla.components.concept.engine.translate.Language
+import mozilla.components.concept.engine.translate.LanguageModel
 import mozilla.components.concept.engine.translate.LanguageSetting
+import mozilla.components.concept.engine.translate.ModelManagementOptions
+import mozilla.components.concept.engine.translate.ModelOperation
+import mozilla.components.concept.engine.translate.ModelState
 import mozilla.components.concept.engine.translate.TranslationDownloadSize
 import mozilla.components.concept.engine.translate.TranslationError
 import mozilla.components.concept.engine.translate.TranslationOperation
@@ -32,6 +36,7 @@ import kotlin.coroutines.suspendCoroutine
  * This middleware is for use with managing any states or resources required for translating a
  * webpage.
  */
+@Suppress("LargeClass")
 class TranslationsMiddleware(
     private val engine: Engine,
     private val scope: CoroutineScope,
@@ -165,6 +170,26 @@ class TranslationsMiddleware(
                     )
                 }
             }
+
+            is TranslationsAction.UpdateLanguageSettingsAction -> {
+                scope.launch {
+                    updateLanguageSetting(
+                        context = context,
+                        languageCode = action.languageCode,
+                        setting = action.setting,
+                    )
+                }
+            }
+
+            is TranslationsAction.ManageLanguageModelsAction -> {
+                scope.launch {
+                    updateLanguageModel(
+                        context = context,
+                        options = action.options,
+                    )
+                }
+            }
+
             else -> {
                 // no-op
             }
@@ -750,8 +775,8 @@ class TranslationsMiddleware(
     /**
      * Updates the language settings with the [Engine].
      *
-     * If an error occurs, then the method will request the page settings be re-fetched and set on
-     * the browser store.
+     * If an error occurs, and a [tabId] is known then the method will request the page settings be
+     * re-fetched and set on the browser store.
      *
      * @param context The context used to request the page settings.
      * @param tabId Tab ID associated with the request.
@@ -760,7 +785,7 @@ class TranslationsMiddleware(
      */
     private fun updateLanguageSetting(
         context: MiddlewareContext<BrowserState, BrowserAction>,
-        tabId: String,
+        tabId: String? = null,
         languageCode: String,
         setting: LanguageSetting,
     ) {
@@ -771,26 +796,37 @@ class TranslationsMiddleware(
             languageSetting = setting,
 
             onSuccess = {
-                // Ensure the session's page settings remain in sync with this update.
-                context.store.dispatch(
-                    TranslationsAction.OperationRequestedAction(
-                        tabId = tabId,
-                        operation = TranslationOperation.FETCH_AUTOMATIC_LANGUAGE_SETTINGS,
-                    ),
-                )
+                // Value was proactively updated in [TranslationsStateReducer] for
+                // [TranslationsBrowserState.languageSettings]
+
+                if (tabId != null) {
+                    // Ensure the session's page settings remain in sync with this update.
+                    context.store.dispatch(
+                        TranslationsAction.OperationRequestedAction(
+                            tabId = tabId,
+                            operation = TranslationOperation.FETCH_AUTOMATIC_LANGUAGE_SETTINGS,
+                        ),
+                    )
+                }
+
                 logger.info("Successfully updated the language preference.")
             },
 
             onError = {
                 logger.error("Could not update the language preference.", it)
+                // The browser store [TranslationsBrowserState.languageSettings] is out of sync,
+                // re-request to sync the state.
+                requestLanguageSettings(context, tabId)
 
-                // Fetch page settings to ensure the state matches the engine.
-                context.store.dispatch(
-                    TranslationsAction.OperationRequestedAction(
-                        tabId = tabId,
-                        operation = TranslationOperation.FETCH_PAGE_SETTINGS,
-                    ),
-                )
+                if (tabId != null) {
+                    // Fetch page settings to ensure the state matches the engine.
+                    context.store.dispatch(
+                        TranslationsAction.OperationRequestedAction(
+                            tabId = tabId,
+                            operation = TranslationOperation.FETCH_PAGE_SETTINGS,
+                        ),
+                    )
+                }
             },
         )
     }
@@ -883,5 +919,67 @@ class TranslationsMiddleware(
             ?.translationsState?.translationEngineState?.detectedLanguages?.userPreferredLangTag ?: return null
         val supportedLanguages = context.store.state.translationEngine.supportedLanguages ?: return null
         return supportedLanguages.findLanguage(userPreferredLang)
+    }
+
+    /**
+     * Requests the language model updates occur on the [Engine].
+     *
+     * Examples of operations include downloading and deleting individual models, all models,
+     * or the cache.
+     *
+     * @param context The context used to update the language models.
+     * @param options The change and specified language models that should change state.
+     */
+    private fun updateLanguageModel(
+        context: MiddlewareContext<BrowserState, BrowserAction>,
+        options: ModelManagementOptions,
+    ) {
+        logger.info("Requesting the translations engine update the language model(s).")
+        engine.manageTranslationsLanguageModel(
+            options = options,
+
+            onSuccess = {
+                // Value was set to a wait state in [TranslationsStateReducer] for
+                // [TranslationsBrowserState.languageModels], so we need to resolve the state.
+                val processState = if (options.operation == ModelOperation.DOWNLOAD) {
+                    ModelState.DOWNLOADED
+                } else {
+                    ModelState.NOT_DOWNLOADED
+                }
+                val newModelState = LanguageModel.determineNewLanguageModelState(
+                    currentLanguageModels = context.store.state.translationEngine.languageModels,
+                    options = options,
+                    newStatus = processState,
+                )
+                if (newModelState != null) {
+                    context.store.dispatch(
+                        TranslationsAction.SetLanguageModelsAction(
+                            languageModels = newModelState,
+                        ),
+                    )
+                    logger.info("Successfully updated the language model(s).")
+                } else {
+                    logger.warn(
+                        "The model(s) were updated with the engine, " +
+                            "but unexpectedly could not update state. " +
+                            "Re-requesting state be retrieved from the engine.",
+                    )
+                    // Unexpectedly lost state, so check with the engine to put it back in-sync.
+                    requestLanguageModels(context)
+                }
+            },
+
+            onError = { error ->
+                logger.error("Could not update the language model(s).", error)
+                // The browser store [TranslationsBrowserState.languageModels] is out of sync,
+                // re-request to sync the state.
+                requestLanguageModels(context)
+                context.store.dispatch(
+                    TranslationsAction.EngineExceptionAction(
+                        error = TranslationError.LanguageModelUpdateError(error),
+                    ),
+                )
+            },
+        )
     }
 }

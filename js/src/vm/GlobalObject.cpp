@@ -113,6 +113,14 @@ static bool IsIteratorHelpersEnabled() {
 #endif
 }
 
+static bool IsAsyncIteratorHelpersEnabled() {
+#ifdef NIGHTLY_BUILD
+  return JS::Prefs::experimental_async_iterator_helpers();
+#else
+  return false;
+#endif
+}
+
 /* static */
 bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
   switch (key) {
@@ -186,6 +194,9 @@ bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
 #ifdef ENABLE_WASM_TYPE_REFLECTIONS
     case JSProto_WasmFunction:
 #endif
+#ifdef ENABLE_WASM_JSPI
+    case JSProto_WasmSuspending:
+#endif
     case JSProto_WasmException:
       return false;
 
@@ -235,11 +246,18 @@ bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
       return JS::GetWeakRefsEnabled() == JS::WeakRefSpecifier::Disabled;
 
     case JSProto_Iterator:
-    case JSProto_AsyncIterator:
       return !IsIteratorHelpersEnabled();
+
+    case JSProto_AsyncIterator:
+      return !IsAsyncIteratorHelpersEnabled();
 
     case JSProto_ShadowRealm:
       return !JS::Prefs::experimental_shadow_realms();
+
+#ifdef NIGHTLY_BUILD
+    case JSProto_Float16Array:
+      return !JS::Prefs::experimental_float16array();
+#endif
 
     default:
       MOZ_CRASH("unexpected JSProtoKey");
@@ -1016,7 +1034,7 @@ JSObject* GlobalObject::createIteratorPrototype(JSContext* cx,
 /* static */
 JSObject* GlobalObject::createAsyncIteratorPrototype(
     JSContext* cx, Handle<GlobalObject*> global) {
-  if (!IsIteratorHelpersEnabled()) {
+  if (!IsAsyncIteratorHelpersEnabled()) {
     return getOrCreateBuiltinProto(cx, global, ProtoKind::AsyncIteratorProto,
                                    initAsyncIteratorProto);
   }

@@ -310,7 +310,7 @@ uint32_t ParseIDFromDeviceID(const nsAString& key, const nsAString& prefix,
     return 0x5143;
   }
   nsresult err;
-  return id.ToInteger(&err, 16);
+  return id.ToUnsignedInteger(&err, 16);
 }
 
 // OS version in 16.16 major/minor form
@@ -1807,6 +1807,12 @@ const nsTArray<GfxDriverInfo>& GfxInfo::GetGfxDriverInfo() {
         nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION, DRIVER_BETWEEN_INCLUSIVE,
         V(10, 18, 15, 4256), V(10, 18, 15, 4293), "FEATURE_FAILURE_BUG_1833809",
         "Intel driver 10.18.15.*");
+
+    APPEND_TO_DRIVER_BLOCKLIST2(
+        OperatingSystem::Windows, DeviceFamily::IntelGen12,
+        nsIGfxInfo::FEATURE_REUSE_DECODER_DEVICE,
+        nsIGfxInfo::FEATURE_BLOCKED_DEVICE, DRIVER_COMPARISON_IGNORED,
+        V(0, 0, 0, 0), "FEATURE_FAILURE_BUG_1896823");
 
     ////////////////////////////////////
     // FEATURE_OVERLAY_VP_AUTO_HDR

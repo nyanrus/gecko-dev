@@ -61,7 +61,7 @@ enum class GCKind {
 // replaying.
 Atomic<int32_t, ReleaseAcquire> nsDynamicAtom::gUnusedAtomCount;
 
-nsDynamicAtom::nsDynamicAtom(already_AddRefed<nsStringBuffer> aBuffer,
+nsDynamicAtom::nsDynamicAtom(already_AddRefed<mozilla::StringBuffer> aBuffer,
                              uint32_t aLength, uint32_t aHash,
                              bool aIsAsciiLowercase)
     : nsAtom(aLength, /* aIsStatic = */ false, aHash, aIsAsciiLowercase),
@@ -82,9 +82,9 @@ nsDynamicAtom* nsDynamicAtom::Create(const nsAString& aString, uint32_t aHash) {
   // We tack the chars onto the end of the nsDynamicAtom object.
   const bool isAsciiLower =
       ::IsAsciiLowercase(aString.Data(), aString.Length());
-  RefPtr<nsStringBuffer> buffer = nsStringBuffer::FromString(aString);
+  RefPtr<mozilla::StringBuffer> buffer = aString.GetStringBuffer();
   if (!buffer) {
-    buffer = nsStringBuffer::Create(aString.Data(), aString.Length());
+    buffer = mozilla::StringBuffer::Create(aString.Data(), aString.Length());
     if (MOZ_UNLIKELY(!buffer)) {
       MOZ_CRASH("Out of memory atomizing");
     }
@@ -111,7 +111,7 @@ void nsAtom::ToString(nsAString& aString) const {
     // which is what's important.
     aString.AssignLiteral(AsStatic()->String(), mLength);
   } else {
-    AsDynamic()->StringBuffer()->ToString(mLength, aString);
+    aString.Assign(AsDynamic()->StringBuffer(), mLength);
   }
 }
 
@@ -577,7 +577,7 @@ already_AddRefed<nsAtom> nsAtomTable::Atomize(const nsACString& aUTF8String) {
 
   nsString str;
   CopyUTF8toUTF16(aUTF8String, str);
-  MOZ_ASSERT(nsStringBuffer::FromString(str), "Should create a string buffer");
+  MOZ_ASSERT(str.GetStringBuffer(), "Should create a string buffer");
   RefPtr<nsAtom> atom = dont_AddRef(nsDynamicAtom::Create(str, key.mHash));
 
   he->mAtom = atom;

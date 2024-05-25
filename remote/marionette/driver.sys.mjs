@@ -29,9 +29,12 @@ ChromeUtils.defineESModuleGetters(lazy, {
   MarionettePrefs: "chrome://remote/content/marionette/prefs.sys.mjs",
   modal: "chrome://remote/content/shared/Prompt.sys.mjs",
   navigate: "chrome://remote/content/marionette/navigate.sys.mjs",
-  permissions: "chrome://remote/content/marionette/permissions.sys.mjs",
+  permissions: "chrome://remote/content/shared/Permissions.sys.mjs",
   pprint: "chrome://remote/content/shared/Format.sys.mjs",
   print: "chrome://remote/content/shared/PDF.sys.mjs",
+  PollPromise: "chrome://remote/content/shared/Sync.sys.mjs",
+  PromptHandlers:
+    "chrome://remote/content/shared/webdriver/UserPromptHandler.sys.mjs",
   PromptListener:
     "chrome://remote/content/shared/listeners/PromptListener.sys.mjs",
   quit: "chrome://remote/content/shared/Browser.sys.mjs",
@@ -43,8 +46,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
   TabManager: "chrome://remote/content/shared/TabManager.sys.mjs",
   TimedPromise: "chrome://remote/content/marionette/sync.sys.mjs",
   Timeouts: "chrome://remote/content/shared/webdriver/Capabilities.sys.mjs",
-  UnhandledPromptBehavior:
-    "chrome://remote/content/shared/webdriver/Capabilities.sys.mjs",
   unregisterCommandsActor:
     "chrome://remote/content/marionette/actors/MarionetteCommandsParent.sys.mjs",
   waitForInitialNavigationCompleted:
@@ -1373,9 +1374,20 @@ GeckoDriver.prototype.switchToFrame = async function (cmd) {
     byFrame = el;
   }
 
-  const { browsingContext } = await this.getActor({ top }).switchToFrame(
-    byFrame || id
-  );
+  // If the current context changed during the switchToFrame call, attempt to
+  // call switchToFrame again until the browsing context remains stable.
+  // See https://bugzilla.mozilla.org/show_bug.cgi?id=1786640#c11
+  let browsingContext;
+  for (let i = 0; i < 5; i++) {
+    const currentBrowsingContext = this.currentSession.contentBrowsingContext;
+    ({ browsingContext } = await this.getActor({ top }).switchToFrame(
+      byFrame || id
+    ));
+
+    if (currentBrowsingContext == this.currentSession.contentBrowsingContext) {
+      break;
+    }
+  }
 
   this.currentSession.contentBrowsingContext = browsingContext;
 };
@@ -2806,43 +2818,44 @@ GeckoDriver.prototype._handleUserPrompts = async function () {
     return;
   }
 
-  if (this.dialog.promptType == "beforeunload") {
-    // Wait until the "beforeunload" prompt has been accepted.
-    await this.promptListener.dialogClosed();
+  const textContent = await this.dialog.getText();
+  const promptType = this.dialog.promptType;
+
+  if (promptType === "beforeunload") {
+    // Auto-accepting the prompt happens asynchronously. That means that there
+    // can still be a situation when its not closed yet (eg. for slow builds).
+    await lazy.PollPromise((resolve, reject) => {
+      this.dialog?.isOpen ? reject() : resolve();
+    });
     return;
   }
 
-  const textContent = await this.dialog.getText();
+  let type = "default";
+  if (["alert", "confirm", "prompt"].includes(this.dialog.promptType)) {
+    type = promptType;
+  }
 
-  const behavior = this.currentSession.unhandledPromptBehavior;
-  switch (behavior) {
-    case lazy.UnhandledPromptBehavior.Accept:
+  const userPromptHandler = this.currentSession.userPromptHandler;
+
+  const handler = userPromptHandler.getPromptHandler(type);
+  switch (handler.handler) {
+    case lazy.PromptHandlers.Accept:
       await this.acceptDialog();
       break;
-
-    case lazy.UnhandledPromptBehavior.AcceptAndNotify:
-      await this.acceptDialog();
-      throw new lazy.error.UnexpectedAlertOpenError(
-        `Accepted user prompt dialog: ${textContent}`
-      );
-
-    case lazy.UnhandledPromptBehavior.Dismiss:
+    case lazy.PromptHandlers.Dismiss:
       await this.dismissDialog();
       break;
+    case lazy.PromptHandlers.Ignore:
+      break;
+  }
 
-    case lazy.UnhandledPromptBehavior.DismissAndNotify:
-      await this.dismissDialog();
-      throw new lazy.error.UnexpectedAlertOpenError(
-        `Dismissed user prompt dialog: ${textContent}`
-      );
-
-    case lazy.UnhandledPromptBehavior.Ignore:
-      throw new lazy.error.UnexpectedAlertOpenError(
-        "Encountered unhandled user prompt dialog"
-      );
-
-    default:
-      throw new TypeError(`Unknown unhandledPromptBehavior "${behavior}"`);
+  if (handler.notify) {
+    throw new lazy.error.UnexpectedAlertOpenError(
+      `Unexpected ${promptType} dialog detected. Performed handler "${handler.handler}"`,
+      {
+        text: textContent,
+      }
+    );
   }
 };
 
@@ -3346,24 +3359,8 @@ GeckoDriver.prototype.setPermission = async function (cmd) {
   const { descriptor, state, oneRealm = false } = cmd.parameters;
   const browsingContext = lazy.assert.open(this.getBrowsingContext());
 
-  // XXX: We currently depend on camera/microphone tests throwing UnsupportedOperationError,
-  // the fix is ongoing in bug 1609427.
-  if (["camera", "microphone"].includes(descriptor.name)) {
-    throw new lazy.error.UnsupportedOperationError(
-      "setPermission: camera and microphone permissions are currently unsupported"
-    );
-  }
-
-  // XXX: Allowing this permission causes timing related Android crash, see also bug 1878741
-  if (descriptor.name === "notifications") {
-    if (Services.prefs.getBoolPref("notification.prompt.testing", false)) {
-      // Okay, do nothing. The notifications module will work without permission.
-      return;
-    }
-    throw new lazy.error.UnsupportedOperationError(
-      "setPermission: expected notification.prompt.testing to be set"
-    );
-  }
+  lazy.permissions.validateDescriptor(descriptor);
+  lazy.permissions.validateState(state);
 
   let params;
   try {
@@ -3378,7 +3375,26 @@ GeckoDriver.prototype.setPermission = async function (cmd) {
 
   lazy.assert.boolean(oneRealm);
 
-  lazy.permissions.set(params.type, params.state, oneRealm, browsingContext);
+  if (!lazy.MarionettePrefs.setPermissionEnabled) {
+    throw new lazy.error.UnsupportedOperationError(
+      "'Set Permission' is not available"
+    );
+  }
+
+  let origin = browsingContext.currentURI.prePath;
+
+  // storage-access is a special case.
+  if (descriptor.name === "storage-access") {
+    origin = browsingContext.top.currentURI.prePath;
+
+    params = {
+      type: lazy.permissions.getStorageAccessPermissionsType(
+        browsingContext.currentWindowGlobal.documentURI
+      ),
+    };
+  }
+
+  lazy.permissions.set(params, state, origin);
 };
 
 /**

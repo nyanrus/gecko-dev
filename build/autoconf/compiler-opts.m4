@@ -4,73 +4,9 @@ dnl file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 dnl Add compiler specific options
 
-dnl ============================================================================
-dnl C++ rtti
-dnl We don't use it in the code, but it can be usefull for debugging, so give
-dnl the user the option of enabling it.
-dnl ============================================================================
-AC_DEFUN([MOZ_RTTI],
-[
-if test -z "$_MOZ_USE_RTTI"; then
-    if test "$GNU_CC"; then
-        CXXFLAGS="$CXXFLAGS -fno-rtti"
-    else
-        case "$target" in
-        *-mingw*)
-            CXXFLAGS="$CXXFLAGS -GR-"
-        esac
-    fi
-fi
-])
-
-dnl ========================================================
-dnl =
-dnl = Debugging Options
-dnl =
-dnl ========================================================
-AC_DEFUN([MOZ_DEBUGGING_OPTS],
-[
-
-if test -z "$MOZ_DEBUG" -o -n "$MOZ_ASAN"; then
-    MOZ_NO_DEBUG_RTL=1
-fi
-
-AC_SUBST(MOZ_NO_DEBUG_RTL)
-
-if test -n "$MOZ_DEBUG"; then
-    if test -n "$COMPILE_ENVIRONMENT"; then
-        AC_MSG_CHECKING([for valid debug flags])
-        _SAVE_CFLAGS=$CFLAGS
-        CFLAGS="$CFLAGS $MOZ_DEBUG_FLAGS"
-        AC_TRY_COMPILE([#include <stdio.h>],
-            [printf("Hello World\n");],
-            _results=yes,
-            _results=no)
-        AC_MSG_RESULT([$_results])
-        if test "$_results" = "no"; then
-            AC_MSG_ERROR([These compiler flags are invalid: $MOZ_DEBUG_FLAGS])
-        fi
-        CFLAGS=$_SAVE_CFLAGS
-    fi
-fi
-])
-
 dnl A high level macro for selecting compiler options.
 AC_DEFUN([MOZ_COMPILER_OPTS],
 [
-  MOZ_DEBUGGING_OPTS
-  MOZ_RTTI
-
-if test "$GNU_CC"; then
-    if test -z "$DEVELOPER_OPTIONS"; then
-        CFLAGS="$CFLAGS -ffunction-sections -fdata-sections"
-        CXXFLAGS="$CXXFLAGS -ffunction-sections -fdata-sections"
-    fi
-
-    CFLAGS="$CFLAGS -fno-math-errno"
-    CXXFLAGS="$CXXFLAGS -fno-exceptions -fno-math-errno"
-fi
-
 dnl ========================================================
 dnl = Identical Code Folding
 dnl ========================================================

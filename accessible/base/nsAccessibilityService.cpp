@@ -9,9 +9,11 @@
 #include "ApplicationAccessibleWrap.h"
 #include "ARIAGridAccessible.h"
 #include "ARIAMap.h"
+#include "CssAltContent.h"
 #include "DocAccessible-inl.h"
 #include "DocAccessibleChild.h"
 #include "FocusManager.h"
+#include "mozilla/FocusModel.h"
 #include "HTMLCanvasAccessible.h"
 #include "HTMLElementAccessibles.h"
 #include "HTMLImageMapAccessible.h"
@@ -188,8 +190,7 @@ static bool MustBeAccessible(nsIContent* aContent, DocAccessible* aDocument) {
     // not create Accessibles for some focusable elements; e.g. a span with only
     // a tabindex. Elements that are invisible within this document are excluded
     // earlier in CreateAccessible.
-    if (frame->IsFocusable(/* aWithMouse */ false,
-                           /* aCheckVisibility */ false)) {
+    if (frame->IsFocusable(IsFocusableFlags::IgnoreVisibility)) {
       return true;
     }
   }
@@ -241,12 +242,14 @@ bool nsAccessibilityService::ShouldCreateImgAccessible(
     return false;
   }
 
-  // If the element is not an img, and also not an embedded image via embed or
-  // object, then we should not create an accessible.
+  // If the element is not an img, not an embedded image via embed or object,
+  // and not a pseudo-element with CSS content alt text, then we should not
+  // create an accessible.
   if (!aElement->IsHTMLElement(nsGkAtoms::img) &&
       ((!aElement->IsHTMLElement(nsGkAtoms::embed) &&
         !aElement->IsHTMLElement(nsGkAtoms::object)) ||
-       frame->AccessibleType() != AccType::eImageType)) {
+       frame->AccessibleType() != AccType::eImageType) &&
+      !CssAltContent(aElement)) {
     return false;
   }
 
@@ -1264,7 +1267,13 @@ LocalAccessible* nsAccessibilityService::CreateAccessible(
     newAcc = CreateAccessibleByFrameType(frame, content, aContext);
     MOZ_ASSERT(newAcc, "Accessible not created for text node!");
     document->BindToDocument(newAcc, nullptr);
-    newAcc->AsTextLeaf()->SetText(text.mString);
+    if (auto cssAlt = CssAltContent(content)) {
+      nsAutoString text;
+      cssAlt.AppendToString(text);
+      newAcc->AsTextLeaf()->SetText(text);
+    } else {
+      newAcc->AsTextLeaf()->SetText(text.mString);
+    }
     return newAcc;
   }
 
@@ -1388,7 +1397,7 @@ LocalAccessible* nsAccessibilityService::CreateAccessible(
       LayoutFrameType frameType = frame->Type();
       // FIXME(emilio): Why only these frame types?
       if (frameType == LayoutFrameType::FlexContainer ||
-          frameType == LayoutFrameType::Scroll) {
+          frameType == LayoutFrameType::ScrollContainer) {
         newAcc = new XULTabpanelAccessible(content, document);
       }
     }

@@ -209,14 +209,6 @@ void OOPInit() {}
 const char* GetChildNotificationPipe() { return nullptr; }
 #endif
 
-#ifdef MOZ_CRASHREPORTER_INJECTOR
-void InjectCrashReporterIntoProcess(DWORD processID,
-                                    InjectorCrashCallback* cb) {}
-
-void UnregisterInjectorCallback(DWORD processID) {}
-
-#endif  // MOZ_CRASHREPORTER_INJECTOR
-
 bool GetLastRunCrashID(nsAString& id) { return false; }
 
 #if !defined(XP_WIN) && !defined(XP_MACOSX)
@@ -230,7 +222,7 @@ bool CreateNotificationPipeForChild(int* childCrashFd, int* childCrashRemapFd) {
 bool SetRemoteExceptionHandler(const char* aCrashPipe) { return false; }
 
 bool TakeMinidumpForChild(uint32_t childPid, nsIFile** dump,
-                          AnnotationTable& aAnnotations, uint32_t* aSequence) {
+                          AnnotationTable& aAnnotations) {
   return false;
 }
 

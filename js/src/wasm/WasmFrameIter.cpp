@@ -90,6 +90,19 @@ WasmFrameIter::WasmFrameIter(JitActivation* activation, wasm::Frame* fp)
     lineOrBytecode_ = trapData.bytecodeOffset;
     failedUnwindSignatureMismatch_ = trapData.failedUnwindSignatureMismatch;
 
+#ifdef ENABLE_WASM_TAIL_CALLS
+    // The debugEnabled() relies on valid value of resumePCinCurrentFrame_
+    // to identify DebugFrame. Normally this field is updated at popFrame().
+    // The only case when this can happend is during IndirectCallBadSig
+    // trapping and stack unwinding. The top frame will never be at ReturnStub
+    // callsite, except during IndirectCallBadSig unwinding.
+    const CallSite* site = code_->lookupCallSite(unwoundPC);
+    if (site && site->kind() == CallSite::ReturnStub) {
+      MOZ_ASSERT(trapData.trap == Trap::IndirectCallBadSig);
+      resumePCinCurrentFrame_ = (uint8_t*)unwoundPC;
+    }
+#endif
+
     MOZ_ASSERT(!done());
     return;
   }
@@ -281,9 +294,6 @@ void WasmFrameIter::popFrame() {
 
 #ifdef ENABLE_WASM_JSPI
   stackSwitched_ = callsite->isStackSwitch();
-  if (stackSwitched_ && unwind_ == Unwind::True) {
-    wasm::UnwindStackSwitch(activation_->cx());
-  }
 #endif
 
   MOZ_ASSERT(code_ == &instance()->code());
@@ -1848,8 +1858,6 @@ static const char* ThunkedNativeToDescription(SymbolicAddress func) {
       return "call to native array.init_elem function";
     case SymbolicAddress::ArrayCopy:
       return "call to native array.copy function";
-    case SymbolicAddress::UpdateSuspenderState:
-      return "call to native update suspender state util";
     case SymbolicAddress::SlotsToAllocKindBytesTable:
       MOZ_CRASH(
           "symbolic address was not code and should not have appeared here");
@@ -1858,6 +1866,10 @@ static const char* ThunkedNativeToDescription(SymbolicAddress func) {
     return "call to native " #op " builtin (in wasm)";
       FOR_EACH_BUILTIN_MODULE_FUNC(VISIT_BUILTIN_FUNC)
 #undef VISIT_BUILTIN_FUNC
+#ifdef ENABLE_WASM_JSPI
+    case SymbolicAddress::UpdateSuspenderState:
+      return "call to native update suspender state util";
+#endif
 #ifdef WASM_CODEGEN_DEBUG
     case SymbolicAddress::PrintI32:
     case SymbolicAddress::PrintPtr:

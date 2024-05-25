@@ -4,6 +4,12 @@
 
 "use strict";
 
+/* eslint-disable camelcase */
+// From https://learn.microsoft.com/en-us/windows/win32/winauto/landmark-type-identifiers
+const UIA_CustomLandmarkTypeId = 80000;
+const UIA_MainLandmarkTypeId = 80002;
+/* eslint-enable camelcase */
+
 /**
  * Test the Name property.
  */
@@ -218,4 +224,232 @@ addUiaTask(
   },
   // The IA2 -> UIA proxy doesn't support ClassName.
   { uiaEnabled: true, uiaDisabled: false }
+);
+
+/**
+ * Test the AriaRole property.
+ */
+addUiaTask(
+  `
+<div id="button" role="button">button</div>
+<div id="main" role="main">main</div>
+<div id="unknown" role="unknown">unknown</div>
+<button id="computedButton">computedButton</button>
+<h1 id="computedHeading">computedHeading</h1>
+<main id="computedMain">computedMain</main>
+<div id="generic">generic</div>
+  `,
+  async function testAriaRole() {
+    await definePyVar("doc", `getDocUia()`);
+    is(
+      await runPython(`findUiaByDomId(doc, "button").CurrentAriaRole`),
+      "button",
+      "button has correct AriaRole"
+    );
+    is(
+      await runPython(`findUiaByDomId(doc, "main").CurrentAriaRole`),
+      "main",
+      "main has correct AriaRole"
+    );
+    is(
+      await runPython(`findUiaByDomId(doc, "unknown").CurrentAriaRole`),
+      "unknown",
+      "unknown has correct AriaRole"
+    );
+    // The IA2 -> UIA proxy doesn't compute ARIA roles.
+    if (gIsUiaEnabled) {
+      is(
+        await runPython(
+          `findUiaByDomId(doc, "computedButton").CurrentAriaRole`
+        ),
+        "button",
+        "computedButton has correct AriaRole"
+      );
+      is(
+        await runPython(`findUiaByDomId(doc, "computedMain").CurrentAriaRole`),
+        "main",
+        "computedMain has correct AriaRole"
+      );
+      is(
+        await runPython(
+          `findUiaByDomId(doc, "computedHeading").CurrentAriaRole`
+        ),
+        "heading",
+        "computedHeading has correct AriaRole"
+      );
+      is(
+        await runPython(`findUiaByDomId(doc, "generic").CurrentAriaRole`),
+        "generic",
+        "generic has correct AriaRole"
+      );
+    }
+  }
+);
+
+/**
+ * Test the LocalizedControlType property. We don't support this ourselves, but
+ * the system provides it based on ControlType and AriaRole.
+ */
+addUiaTask(
+  `
+<button id="button">button</button>
+<h1 id="h1">h1</h1>
+<main id="main">main</main>
+  `,
+  async function testLocalizedControlType() {
+    await definePyVar("doc", `getDocUia()`);
+    is(
+      await runPython(
+        `findUiaByDomId(doc, "button").CurrentLocalizedControlType`
+      ),
+      "button",
+      "button has correct LocalizedControlType"
+    );
+    // The IA2 -> UIA proxy doesn't compute ARIA roles, so it can't compute the
+    // correct LocalizedControlType for these either.
+    if (gIsUiaEnabled) {
+      is(
+        await runPython(
+          `findUiaByDomId(doc, "h1").CurrentLocalizedControlType`
+        ),
+        "heading",
+        "h1 has correct LocalizedControlType"
+      );
+      is(
+        await runPython(
+          `findUiaByDomId(doc, "main").CurrentLocalizedControlType`
+        ),
+        "main",
+        "main has correct LocalizedControlType"
+      );
+    }
+  }
+);
+
+/**
+ * Test the LandmarkType property.
+ */
+addUiaTask(
+  `
+<div id="main" role="main">main</div>
+<main id="htmlMain">htmlMain</main>
+<div id="banner" role="banner">banner</div>
+<header id="header">header</header>
+<div id="region" role="region" aria-label="region">region</div>
+<div id="unnamedRegion" role="region">unnamedRegion</div>
+<main id="mainBanner" role="banner">mainBanner</main>
+<div id="none">none</div>
+  `,
+  async function testLandmarkType() {
+    await definePyVar("doc", `getDocUia()`);
+    is(
+      await runPython(`findUiaByDomId(doc, "main").CurrentLandmarkType`),
+      UIA_MainLandmarkTypeId,
+      "main has correct LandmarkType"
+    );
+    is(
+      await runPython(`findUiaByDomId(doc, "htmlMain").CurrentLandmarkType`),
+      UIA_MainLandmarkTypeId,
+      "htmlMain has correct LandmarkType"
+    );
+    is(
+      await runPython(`findUiaByDomId(doc, "banner").CurrentLandmarkType`),
+      UIA_CustomLandmarkTypeId,
+      "banner has correct LandmarkType"
+    );
+    is(
+      await runPython(`findUiaByDomId(doc, "header").CurrentLandmarkType`),
+      UIA_CustomLandmarkTypeId,
+      "header has correct LandmarkType"
+    );
+    is(
+      await runPython(`findUiaByDomId(doc, "region").CurrentLandmarkType`),
+      UIA_CustomLandmarkTypeId,
+      "region has correct LandmarkType"
+    );
+    is(
+      await runPython(
+        `findUiaByDomId(doc, "unnamedRegion").CurrentLandmarkType`
+      ),
+      0,
+      "unnamedRegion has correct LandmarkType"
+    );
+    // ARIA role takes precedence.
+    is(
+      await runPython(`findUiaByDomId(doc, "mainBanner").CurrentLandmarkType`),
+      UIA_CustomLandmarkTypeId,
+      "mainBanner has correct LandmarkType"
+    );
+    is(
+      await runPython(`findUiaByDomId(doc, "none").CurrentLandmarkType`),
+      0,
+      "none has correct LandmarkType"
+    );
+  }
+);
+
+/**
+ * Test the LocalizedLandmarkType property.
+ */
+addUiaTask(
+  `
+<div id="main" role="main">main</div>
+<div id="contentinfo" role="contentinfo">contentinfo</div>
+<div id="region" role="region" aria-label="region">region</div>
+<div id="unnamedRegion" role="region">unnamedRegion</div>
+<main id="mainBanner" role="banner">mainBanner</main>
+<div id="none">none</div>
+  `,
+  async function testLocalizedLandmarkType() {
+    await definePyVar("doc", `getDocUia()`);
+    // Provided by the system.
+    is(
+      await runPython(
+        `findUiaByDomId(doc, "main").CurrentLocalizedLandmarkType`
+      ),
+      "main",
+      "main has correct LocalizedLandmarkType"
+    );
+    // The IA2 -> UIA proxy doesn't follow the Core AAM spec for this role.
+    if (gIsUiaEnabled) {
+      // Provided by us.
+      is(
+        await runPython(
+          `findUiaByDomId(doc, "contentinfo").CurrentLocalizedLandmarkType`
+        ),
+        "content information",
+        "contentinfo has correct LocalizedLandmarkType"
+      );
+    }
+    is(
+      await runPython(
+        `findUiaByDomId(doc, "region").CurrentLocalizedLandmarkType`
+      ),
+      "region",
+      "region has correct LocalizedLandmarkType"
+    );
+    // Invalid landmark.
+    is(
+      await runPython(
+        `findUiaByDomId(doc, "unnamedRegion").CurrentLocalizedLandmarkType`
+      ),
+      "",
+      "unnamedRegion has correct LocalizedLandmarkType"
+    );
+    // ARIA role takes precedence.
+    is(
+      await runPython(
+        `findUiaByDomId(doc, "mainBanner").CurrentLocalizedLandmarkType`
+      ),
+      "banner",
+      "mainBanner has correct LocalizedLandmarkType"
+    );
+    is(
+      await runPython(
+        `findUiaByDomId(doc, "none").CurrentLocalizedLandmarkType`
+      ),
+      "",
+      "none has correct LocalizedLandmarkType"
+    );
+  }
 );

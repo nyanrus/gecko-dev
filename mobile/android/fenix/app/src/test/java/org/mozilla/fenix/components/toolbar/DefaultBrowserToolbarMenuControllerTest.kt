@@ -837,9 +837,7 @@ class DefaultBrowserToolbarMenuControllerTest {
             verify {
                 navController.navigate(
                     directionsEq(
-                        BrowserFragmentDirections.actionBrowserFragmentToTranslationsDialogFragment(
-                            sessionId = selectedTab.id,
-                        ),
+                        BrowserFragmentDirections.actionBrowserFragmentToTranslationsDialogFragment(),
                     ),
                 )
             }
@@ -873,7 +871,6 @@ class DefaultBrowserToolbarMenuControllerTest {
         sessionFeature = sessionFeatureWrapper,
         topSitesStorage = topSitesStorage,
         pinnedSiteStorage = pinnedSiteStorage,
-        browserStore = browserStore,
         onShowPinVerification = {},
         onBiometricAuthenticationSuccessful = {},
     ).apply {

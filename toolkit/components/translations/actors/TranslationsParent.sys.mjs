@@ -464,7 +464,10 @@ export class TranslationsParent extends JSWindowActorParent {
     if (!lazy.automaticallyPopupPref) {
       return;
     }
-    if (lazy.BrowserHandler?.kiosk) {
+
+    // On Android the BrowserHandler is intermittently not available (for unknown reasons).
+    // Check that the component is available before de-lazifying lazy.BrowserHandler.
+    if (Cc["@mozilla.org/browser/clh;1"] && lazy.BrowserHandler?.kiosk) {
       // Pop-ups should not be shown in kiosk mode.
       return;
     }
@@ -579,6 +582,21 @@ export class TranslationsParent extends JSWindowActorParent {
   }
 
   /**
+   * Returns the word count of the text for a given language.
+   *
+   * @param {string} langTag - A BCP-47 language tag.
+   * @param {string} text - The text for which to count words.
+   *
+   * @returns {number} - The count of words in the text.
+   * @throws If a segmenter could not be created for the given language tag.
+   */
+  static countWords(langTag, text) {
+    const segmenter = new Intl.Segmenter(langTag, { granularity: "word" });
+    const segments = Array.from(segmenter.segment(text));
+    return segments.filter(segment => segment.isWordLike).length;
+  }
+
+  /**
    * Retrieves the Translations actor from the current browser context.
    *
    * @param {object} browser - The browser object from which to get the context.
@@ -637,7 +655,7 @@ export class TranslationsParent extends JSWindowActorParent {
    * @param {object} gBrowser
    * @returns {boolean}
    */
-  static isRestrictedPage(gBrowser) {
+  static isFullPageTranslationsRestrictedForPage(gBrowser) {
     const contentType = gBrowser.selectedBrowser.documentContentType;
     const scheme = gBrowser.currentURI.scheme;
 
@@ -645,7 +663,8 @@ export class TranslationsParent extends JSWindowActorParent {
       return true;
     }
 
-    // Keep this logic up to date with TranslationsChild.prototype.#isRestrictedPage.
+    // Keep this logic up to date with the "matches" array in the
+    // `toolkit/modules/ActorManagerParent.sys.mjs` definition.
     switch (scheme) {
       case "https":
       case "http":
@@ -906,6 +925,9 @@ export class TranslationsParent extends JSWindowActorParent {
         );
 
         return undefined;
+      }
+      case "Translations:ReportFirstVisibleChange": {
+        this.languageState.hasVisibleChange = true;
       }
     }
     return undefined;
@@ -2111,6 +2133,7 @@ export class TranslationsParent extends JSWindowActorParent {
         toLanguage,
         topPreferredLanguage,
         autoTranslate: reportAsAutoTranslate,
+        requestTarget: "full-page",
       });
 
       this.sendAsyncMessage(
@@ -2135,6 +2158,7 @@ export class TranslationsParent extends JSWindowActorParent {
     // Skip auto-translate for one page load.
     const windowState = this.getWindowState();
     windowState.isPageRestored = true;
+    this.languageState.hasVisibleChange = false;
     this.languageState.requestedTranslationPair = null;
     windowState.previousDetectedLanguages =
       this.languageState.detectedLanguages;
@@ -2228,7 +2252,7 @@ export class TranslationsParent extends JSWindowActorParent {
       return false;
     }
     let languagePairs = await TranslationsParent.getLanguagePairs();
-    return Boolean(languagePairs.find(({ fromLang }) => fromLang === langTag));
+    return Boolean(languagePairs.find(({ toLang }) => toLang === langTag));
   }
 
   /**
@@ -2760,6 +2784,9 @@ class TranslationsLanguageState {
   /** @type {LangTags | null} */
   #detectedLanguages = null;
 
+  /** @type {boolean} */
+  #hasVisibleChange = false;
+
   /** @type {null | TranslationErrors} */
   #error = null;
 
@@ -2821,6 +2848,24 @@ class TranslationsLanguageState {
     }
 
     this.#detectedLanguages = detectedLanguages;
+    this.dispatch();
+  }
+
+  /**
+   * A visual translation change occurred on the DOM.
+   *
+   * @returns {boolean}
+   */
+  get hasVisibleChange() {
+    return this.#hasVisibleChange;
+  }
+
+  set hasVisibleChange(hasVisibleChange) {
+    if (this.#hasVisibleChange === hasVisibleChange) {
+      return;
+    }
+
+    this.#hasVisibleChange = hasVisibleChange;
     this.dispatch();
   }
 

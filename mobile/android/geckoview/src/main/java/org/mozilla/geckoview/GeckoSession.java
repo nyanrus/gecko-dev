@@ -1327,7 +1327,13 @@ public class GeckoSession {
    */
   @AnyThread
   public static @NonNull String getDefaultUserAgent() {
-    return BuildConfig.USER_AGENT_GECKOVIEW_MOBILE;
+    // Spoof version "Android 10" for Android OS versions < 10 (Q) to reduce
+    // their fingerprintable user information. For Android OS versions >= 10,
+    // report the real OS version because some enterprise websites only want to
+    // permit clients with recent OS version (like bug 1876742).
+    return Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+        ? BuildConfig.USER_AGENT_GECKOVIEW_MOBILE_ANDROID_10
+        : BuildConfig.USER_AGENT_GECKOVIEW_MOBILE;
   }
 
   /**
@@ -1589,36 +1595,6 @@ public class GeckoSession {
             final ContentDelegate delegate = session.getContentDelegate();
             if (delegate != null) {
               delegate.onShowDynamicToolbar(session);
-            }
-          });
-    }
-
-    @WrapForJNI(calledFrom = "gecko")
-    private void onUpdateSessionStore(final GeckoBundle aBundle) {
-      ThreadUtils.runOnUiThread(
-          () -> {
-            final GeckoSession session = mOwner.get();
-            if (session == null) {
-              return;
-            }
-            GeckoBundle scroll = aBundle.getBundle("scroll");
-            if (scroll == null) {
-              scroll = new GeckoBundle();
-              aBundle.putBundle("scroll", scroll);
-            }
-
-            // Here we unfortunately need to do some re-mapping since `zoom` is passed in a separate
-            // bunds and we wish to keep the bundle format.
-            scroll.putBundle("zoom", aBundle.getBundle("zoom"));
-            final SessionState stateCache = session.mStateCache;
-            stateCache.updateSessionState(aBundle);
-            final SessionState state = new SessionState(stateCache);
-            if (!state.isEmpty()) {
-              final ProgressDelegate progressDelegate = session.getProgressDelegate();
-              if (progressDelegate != null) {
-                progressDelegate.onSessionStateChange(session, state);
-              } else {
-              }
             }
           });
     }
@@ -4951,7 +4927,7 @@ public class GeckoSession {
      */
     @UiThread
     @Deprecated
-    @DeprecationSchedule(id = "geckoview-onlocationchange", version = 127)
+    @DeprecationSchedule(id = "geckoview-onlocationchange", version = 128)
     default void onLocationChange(
         @NonNull GeckoSession session,
         @Nullable String url,

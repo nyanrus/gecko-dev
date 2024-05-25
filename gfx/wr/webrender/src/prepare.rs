@@ -35,7 +35,7 @@ use crate::render_task_cache::RenderTaskCacheKeyKind;
 use crate::render_task_cache::{RenderTaskCacheKey, to_cache_size, RenderTaskParent};
 use crate::render_task::{RenderTaskKind, RenderTask, SubPass, MaskSubPass, EmptyTask};
 use crate::segment::SegmentBuilder;
-use crate::util::{clamp_to_scale_factor, pack_as_float};
+use crate::util::{clamp_to_scale_factor, pack_as_float, ScaleOffset};
 use crate::visibility::{compute_conservative_visible_rect, PrimitiveVisibility, VisibilityState};
 
 
@@ -174,6 +174,7 @@ fn prepare_prim_for_render(
             pic_context.subpixel_mode,
             frame_state,
             frame_context,
+            data_stores,
             scratch,
             tile_caches,
         ) {
@@ -961,7 +962,8 @@ fn prepare_interned_prim_for_render(
                     // may have changed due to downscaling. We could handle this separate
                     // case as a follow up.
                     Some(PictureCompositeMode::Filter(Filter::Blur { .. })) |
-                    Some(PictureCompositeMode::Filter(Filter::DropShadows { .. })) => {
+                    Some(PictureCompositeMode::Filter(Filter::DropShadows { .. })) |
+                    Some(PictureCompositeMode::SVGFEGraph( .. )) => {
                         true
                     }
                     _ => {
@@ -992,6 +994,7 @@ fn prepare_interned_prim_for_render(
                     prim_instance.vis.clip_chain.local_clip_rect,
                     PremultipliedColorF::WHITE,
                     &[],
+                    ScaleOffset::identity(),
                 );
 
                 // Handle masks on the source. This is the common case, and occurs for:

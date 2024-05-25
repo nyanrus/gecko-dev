@@ -8,6 +8,7 @@ with Files("**"):
     BUG_COMPONENT = ("Core", "Privacy: Anti-Tracking")
 
 XPIDL_SOURCES += [
+    "nsIBounceTrackingMapEntry.idl",
     "nsIBounceTrackingProtection.idl",
 ]
 
@@ -19,6 +20,7 @@ XPCOM_MANIFESTS += [
 ]
 
 EXPORTS.mozilla += [
+    "BounceTrackingMapEntry.h",
     "BounceTrackingProtection.h",
     "BounceTrackingProtectionStorage.h",
     "BounceTrackingRecord.h",
@@ -28,6 +30,7 @@ EXPORTS.mozilla += [
 ]
 
 UNIFIED_SOURCES += [
+    "BounceTrackingMapEntry.cpp",
     "BounceTrackingProtection.cpp",
     "BounceTrackingProtectionStorage.cpp",
     "BounceTrackingRecord.cpp",
@@ -49,3 +52,5 @@ BROWSER_CHROME_MANIFESTS += [
 ]
 
 XPCSHELL_TESTS_MANIFESTS += ["test/xpcshell/xpcshell.toml"]
+
+MARIONETTE_MANIFESTS += ["test/marionette/manifest.toml"]

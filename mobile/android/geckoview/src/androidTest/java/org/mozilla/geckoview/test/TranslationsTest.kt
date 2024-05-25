@@ -6,6 +6,7 @@ package org.mozilla.geckoview.test
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.MediumTest
+import junit.framework.TestCase.assertFalse
 import junit.framework.TestCase.assertTrue
 import org.json.JSONObject
 import org.junit.After
@@ -78,7 +79,7 @@ class TranslationsTest : BaseSessionTest() {
                 handled.complete(null)
             }
         })
-        var expectedTranslateEvent = JSONObject(
+        val expectedTranslateEvent = JSONObject(
             """
             {
             "actor":{
@@ -89,6 +90,7 @@ class TranslationsTest : BaseSessionTest() {
                       "docLangTag": "es"
                     },
                     "requestedTranslationPair": null,
+                    "hasVisibleChange": false,
                     "error": null,
                     "isEngineReady": false
                     }
@@ -350,10 +352,23 @@ class TranslationsTest : BaseSessionTest() {
     fun testManageLanguageModel() {
         val options = ModelManagementOptions.Builder()
             .languageToManage("en")
-            .operation(TranslationsController.RuntimeTranslation.DOWNLOAD)
+            .operation(DOWNLOAD)
             .build()
 
-        assertTrue("ModelManagementOptions builder options work as expected.", options.language == "en" && options.operation == DOWNLOAD)
+        assertTrue(
+            "ModelManagementOptions builder options work as expected.",
+            options.language == "en" && options.operation == DOWNLOAD,
+        )
+
+        val nonNormalizedOptions = ModelManagementOptions.Builder()
+            .languageToManage("EN")
+            .operation("DoWnLoAd")
+            .build()
+
+        assertTrue(
+            "ModelManagementOptions builder options work as expected on non-normalized options.",
+            nonNormalizedOptions.language == "en" && nonNormalizedOptions.operation == DOWNLOAD,
+        )
     }
 
     @Test
@@ -639,6 +654,91 @@ class TranslationsTest : BaseSessionTest() {
                     te.code == ERROR_MODEL_COULD_NOT_DELETE,
                 )
             }
+
+            val malformedRequest = ModelManagementOptions.Builder()
+                .operation("not-a-function")
+                .operationLevel("not-an-operation")
+                .build()
+            try {
+                sessionRule.waitForResult(RuntimeTranslation.manageLanguageModel(malformedRequest))
+                assertTrue("Should not complete malformed requests in automation.", false)
+            } catch (e: RuntimeException) {
+                // Wait call causes a runtime exception too.
+                val te = e.cause as TranslationsException
+                assertTrue(
+                    "Correctly could not submit a malformed request.",
+                    te.code == TranslationsException.ERROR_UNKNOWN,
+                )
+            }
         }
+    }
+
+    @Test
+    fun hasVisibleChangeTest() {
+        mainSession.loadTestPath(TRANSLATIONS_ES)
+        mainSession.waitForPageStop()
+
+        val handled = GeckoResult<Void>()
+        var delegateCalled = 0
+        sessionRule.delegateUntilTestEnd(object : Delegate {
+            @AssertCalled(count = 2)
+            override fun onTranslationStateChange(
+                session: GeckoSession,
+                translationState: TranslationState?,
+            ) {
+                delegateCalled++
+
+                if (delegateCalled == 1) {
+                    assertFalse("Initially not visibly changed.", translationState!!.hasVisibleChange)
+                }
+
+                if (delegateCalled == 2) {
+                    assertTrue("After a translation, the DOM should be visibly changed.", translationState!!.hasVisibleChange)
+                    handled.complete(null)
+                }
+            }
+        })
+        val notTranslated = JSONObject(
+            """
+            {
+            "actor":{
+                "languageState":{
+                    "detectedLanguages": {
+                      "userLangTag": "en",
+                      "isDocLangTagSupported": true,
+                      "docLangTag": "es"
+                    },
+                    "requestedTranslationPair": null,
+                    "hasVisibleChange": false,
+                    "error": null,
+                    "isEngineReady": false
+                    }
+                }
+            }
+            """.trimIndent(),
+        )
+        mainSession.triggerLanguageStateChange(notTranslated)
+
+        val translated = JSONObject(
+            """
+            {
+            "actor":{
+                "languageState":{
+                    "detectedLanguages": {
+                      "userLangTag": "en",
+                      "isDocLangTagSupported": true,
+                      "docLangTag": "es"
+                    },
+                    "requestedTranslationPair": {"fromLanguage" : "es" , "toLanguage" : "en"},
+                    "hasVisibleChange": true,
+                    "error": null,
+                    "isEngineReady": true
+                    }
+                }
+            }
+            """.trimIndent(),
+        )
+        mainSession.triggerLanguageStateChange(translated)
+        sessionRule.waitForResult(handled)
     }
 }
