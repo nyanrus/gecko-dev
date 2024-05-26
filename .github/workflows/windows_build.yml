@@ -41,7 +41,7 @@ jobs:
 
         cp ./.github/workflows/mozconfigs/win64.mozconfig mozconfig
 
-        sudo apt install msiextract -y
+        sudo apt install msitools -y
 
         ./mach --no-interactive bootstrap --application-choice browser
 
