@@ -3,7 +3,6 @@ ac_add_options --with-app-basename=Noraneko
 ac_add_options --disable-maintenance-service
 ac_add_options --disable-updater
 ac_add_options --disable-tests
-MOZ_REQUIRE_SIGNING=
 ac_add_options --disable-crashreporter
 ac_add_options MOZ_TELEMETRY_REPORTING=
 ac_add_options --enable-bootstrap
