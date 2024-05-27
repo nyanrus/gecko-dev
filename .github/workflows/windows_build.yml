@@ -74,7 +74,7 @@ jobs:
     # Publish START
     - name: compress zstd
       run: |
-        tar -hcfv ~/noraneko.tar obj-${arch}-pc-windows-msvc/*
+        tar -hcfv ~/noraneko.tar obj-x86_64-pc-windows-msvc/*
         zstd ~/noraneko.tar -19 -o ~/noraneko.tar.zst
 
     - name: Publish Package🎁
