@@ -10,7 +10,6 @@ ac_add_options --enable-bootstrap
 #? https://phabricator.services.mozilla.com/D170170
 ac_add_options --target=x86_64-pc-windows-msvc
 #sccache
-mk_add_options 'export RUSTFLAGS="-Zthreads=4"'
 #mk_add_options 'export RUSTC_WRAPPER=sccache'
 #mk_add_options 'export CCACHE_CPP2=yes'
 #ac_add_options --with-ccache
