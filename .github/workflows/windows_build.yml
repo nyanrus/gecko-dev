@@ -30,7 +30,8 @@ jobs:
 
     - name: setup Rust 🦀
       run: |
-        rustup default nightly-x86_64-pc-windows-msvc
+        rustup default nightly
+        rustup target add x86_64-pc-windows-msvc
 
         #? https://github.com/mozilla/sccache#known-caveats
         export CARGO_INCREMENTAL=0
